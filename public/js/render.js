@@ -37,6 +37,7 @@ import {
   upcomingPayments
 } from "./finance.js";
 import { parseDate, SCHEMA_VERSION, state, toInputDate, DAY_MS } from "./state.js";
+import { readConflictBackup, readSyncConflicts } from "./storage.js";
 
 export const dom = {};
 
@@ -662,6 +663,7 @@ function renderSettings() {
     <article class="list-item"><div><strong>Diagnostico</strong><span>${diagnostics.length ? `${diagnostics.length} alerta(s) de integridad detectada(s)` : "Relaciones principales correctas"}</span></div><span class="badge ${diagnostics.length ? "urgente" : "saludable"}">${diagnostics.length ? "revisar" : "OK"}</span></article>
     ${diagnostics.slice(0, 8).map((item) => `<article class="list-item audit-item"><div><strong>${escapeHTML(item.title)}</strong><span>${escapeHTML(item.detail)}</span></div><span class="badge ${item.tone}">${escapeHTML(item.label)}</span></article>`).join("")}
   `;
+  renderSyncConflicts();
   if (dom.activityLogList) {
     const rows = state.activityLogs
       .filter((item) => !item.userId || item.userId === user.id)
@@ -1786,6 +1788,133 @@ export function getProject(id) {
 
 export function getInvoice(id) {
   return invoices().find((invoice) => invoice.id === id);
+}
+
+const SYNC_COLLECTION_LABELS = {
+  clients: "Cliente",
+  projects: "Proyecto",
+  invoices: "Factura",
+  payments: "Pago",
+  movements: "Movimiento",
+  subscriptions: "Suscripcion",
+  tasks: "Tarea",
+  goals: "Meta",
+  requests: "Solicitud",
+  notes: "Nota",
+  actions: "Accion",
+  opportunities: "Oportunidad",
+  budgets: "Presupuesto",
+  calendarEvents: "Evento",
+  documents: "Documento",
+  supportPlans: "Plan de soporte",
+  teamMembers: "Miembro del equipo",
+  marketingCampaigns: "Campana",
+  clientPortalItems: "Portal cliente",
+  activityLogs: "Historial",
+  companySettings: "Configuracion",
+  userProfiles: "Perfil",
+  exchangeRate: "Cotizacion"
+};
+
+const SYNC_FIELD_LABELS = {
+  name: "Nombre",
+  title: "Titulo",
+  company: "Empresa",
+  email: "Email",
+  phone: "Telefono",
+  status: "Estado",
+  amount: "Monto",
+  paidAmount: "Monto pagado",
+  currency: "Moneda",
+  date: "Fecha",
+  dueDate: "Vencimiento",
+  startDate: "Inicio",
+  endDate: "Fin",
+  notes: "Notas",
+  observations: "Observaciones",
+  description: "Descripcion",
+  priority: "Prioridad",
+  progress: "Avance",
+  service: "Servicio",
+  number: "Numero",
+  exchangeRate: "Cotizacion"
+};
+
+// Differences left by automatic merges of concurrent edits (see js/sync-merge.js).
+export function renderSyncConflicts() {
+  const container = document.getElementById("syncConflictList");
+  if (!container) return;
+  const conflicts = readSyncConflicts();
+  const backup = readConflictBackup();
+  let backupDate = "";
+  try {
+    backupDate = backup ? JSON.parse(backup).rejectedAt : "";
+  } catch {
+    backupDate = "";
+  }
+
+  if (!conflicts.length && !backup) {
+    container.innerHTML = `<article class="list-item"><div><strong>Sincronizacion</strong><span>No hay diferencias pendientes con otros usuarios.</span></div><span class="badge saludable">OK</span></article>`;
+    return;
+  }
+
+  const rows = conflicts.map((item) => {
+    const kind = SYNC_COLLECTION_LABELS[item.collection] || labelize(item.collection);
+    const title = `${kind}${item.label ? ` - ${item.label}` : ""}`;
+    if (item.kind === "delete") {
+      const who = item.deletedBy === "local" ? "Lo eliminaste vos, pero otro usuario lo edito" : "Otro usuario lo elimino, pero vos lo editaste";
+      return `
+        <article class="list-item audit-item">
+          <div><strong>${escapeHTML(title)}</strong><span>${escapeHTML(who)}: se conservo para no perder datos (${syncDateText(item.at)}).</span></div>
+          <div class="backup-actions">
+            <button class="ghost-button compact" type="button" data-sync-conflict="${escapeHTML(item.key)}" data-sync-choice="keep">Conservar</button>
+            <button class="danger-button compact" type="button" data-sync-conflict="${escapeHTML(item.key)}" data-sync-choice="delete">Eliminar igualmente</button>
+          </div>
+        </article>`;
+    }
+    const field = item.field ? (SYNC_FIELD_LABELS[item.field] || labelize(item.field)) : "Valor";
+    return `
+      <article class="list-item audit-item">
+        <div>
+          <strong>${escapeHTML(title)} - ${escapeHTML(field)}</strong>
+          <span>Quedo tu valor: ${escapeHTML(syncValueText(item.localValue))}</span>
+          <span>Valor del otro usuario: ${escapeHTML(syncValueText(item.remoteValue))}</span>
+        </div>
+        <div class="backup-actions">
+          <button class="ghost-button compact" type="button" data-sync-conflict="${escapeHTML(item.key)}" data-sync-choice="keep">Mantener el mio</button>
+          <button class="ghost-button compact" type="button" data-sync-conflict="${escapeHTML(item.key)}" data-sync-choice="remote">Usar el del otro</button>
+        </div>
+      </article>`;
+  });
+
+  if (backup) {
+    rows.unshift(`
+      <article class="list-item audit-item">
+        <div><strong>Respaldo completo sin combinar</strong><span>Tu version del ${syncDateText(backupDate)} no se pudo combinar automaticamente. Descargala para revisarla.</span></div>
+        <div class="backup-actions">
+          <button class="ghost-button compact" type="button" data-sync-backup="download">Descargar</button>
+          <button class="danger-button compact" type="button" data-sync-backup="discard">Descartar</button>
+        </div>
+      </article>`);
+  }
+
+  container.innerHTML = `
+    <article class="list-item"><div><strong>Cambios combinados con otros usuarios</strong><span>${conflicts.length} diferencia(s) para revisar. Por defecto quedo tu valor.</span></div>
+      ${conflicts.length > 1 ? `<button class="ghost-button compact" type="button" data-sync-dismiss-all="1">Mantener todo lo mio</button>` : `<span class="badge urgente">revisar</span>`}
+    </article>
+    ${rows.join("")}
+  `;
+}
+
+function syncDateText(value) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "" : date.toLocaleString("es-AR", { dateStyle: "short", timeStyle: "short" });
+}
+
+function syncValueText(value) {
+  if (value === null || value === undefined || value === "") return "(vacio)";
+  const text = typeof value === "object" ? JSON.stringify(value) : String(value);
+  return text.length > 120 ? `${text.slice(0, 117)}...` : text;
 }
 
 export function labelize(value) {

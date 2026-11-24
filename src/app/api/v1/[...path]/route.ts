@@ -1,15 +1,18 @@
 import { createHmac, timingSafeEqual } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { isValidLoginPassword, LoginConfigError, loginEmailFor, matchAllowedUsername } from "@/lib/login-credentials";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const ACCESS_TTL_SECONDS = 15 * 60;
 const REFRESH_TTL_SECONDS = 7 * 24 * 60 * 60;
-const DEFAULT_USERS = ["FranPernil", "MaxiTaxi"];
-const DEFAULT_PASSWORD = "LiamVillero123";
 const SHARED_SNAPSHOT_USER_ID = "shared";
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_MAX_FAILURES = 10;
+const DEV_CORS_ORIGINS = ["http://localhost:5500", "http://127.0.0.1:5500"];
 
 type RouteContext = {
   params: Promise<{ path?: string[] }>;
@@ -42,14 +45,15 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
   return handleRequest(request, context);
 }
 
-export async function OPTIONS() {
-  return new NextResponse(null, {
-    status: 204,
-    headers: corsHeaders()
-  });
+export async function OPTIONS(request: NextRequest) {
+  return withCors(request, new NextResponse(null, { status: 204 }));
 }
 
 async function handleRequest(request: NextRequest, context: RouteContext) {
+  return withCors(request, await route(request, context));
+}
+
+async function route(request: NextRequest, context: RouteContext) {
   try {
     const path = await routePath(context);
     const method = request.method.toUpperCase();
@@ -91,13 +95,21 @@ async function handleRequest(request: NextRequest, context: RouteContext) {
       const session = await requireSession(request, "access");
       const body = await readJson(request);
       const snapshot = sanitizeSnapshot(body.snapshot ?? body);
+      const baseUpdatedAt = parseBaseUpdatedAt(body.baseUpdatedAt);
       await ensureSnapshotTable();
-      const saved = await prisma.appSnapshot.upsert({
-        where: { userId: session.userId },
-        create: { userId: session.userId, data: snapshot },
-        update: { data: snapshot }
-      });
-      return json({ ok: true, updatedAt: saved.updatedAt });
+
+      const savedAt = await saveSnapshot(session.userId, snapshot, baseUpdatedAt);
+      if (!savedAt) {
+        const current = await prisma.appSnapshot.findUnique({
+          where: { userId: session.userId }
+        });
+        return json({
+          message: "Otro usuario guardo cambios antes. Se cargo la version mas reciente.",
+          snapshot: current?.data ?? null,
+          updatedAt: current?.updatedAt ?? null
+        }, 409);
+      }
+      return json({ ok: true, updatedAt: savedAt });
     }
 
     return json({ message: "Ruta no encontrada." }, 404);
@@ -105,22 +117,99 @@ async function handleRequest(request: NextRequest, context: RouteContext) {
     if (error instanceof AuthError) {
       return unauthorized(error.message);
     }
+    if (error instanceof LoginConfigError) {
+      console.error(error.message);
+      return json({ message: "El servidor no tiene configurado el acceso. Contacta al administrador." }, 503);
+    }
     console.error(error);
     return json({ message: "Error interno del servidor." }, 500);
   }
 }
 
 async function login(request: NextRequest) {
+  const clientKey = clientAddress(request);
+  if (isLoginBlocked(clientKey)) {
+    return json({ message: "Demasiados intentos fallidos. Espera unos minutos e intenta de nuevo." }, 429);
+  }
+
   const body = await readJson(request);
   const credential = String(body.credential || body.email || body.username || "").trim();
-  const password = String(body.password || "").trim();
-  const username = allowedUsername(credential);
+  const password = String(body.password || "");
+  tokenSecret(); // fail closed before issuing tokens if the signing secret is missing
+  const passwordOk = isValidLoginPassword(password);
+  const username = matchAllowedUsername(credential);
 
-  if (!username || password !== allowedPassword()) {
+  if (!username || !passwordOk) {
+    registerLoginFailure(clientKey);
     return unauthorized("Usuario o contrasena incorrectos.");
   }
 
+  loginFailures.delete(clientKey);
   return json(sessionPayload({ userId: userIdFor(username), username }));
+}
+
+// Optimistic concurrency: a write only lands if the client saw the latest version.
+// Returns the new updatedAt, or null when the stored snapshot changed in the meantime.
+async function saveSnapshot(userId: string, snapshot: Prisma.InputJsonObject, baseUpdatedAt: Date | null) {
+  const updatedAt = new Date();
+
+  if (baseUpdatedAt) {
+    const { count } = await prisma.appSnapshot.updateMany({
+      where: { userId, updatedAt: baseUpdatedAt },
+      data: { data: snapshot, updatedAt }
+    });
+    return count === 1 ? updatedAt : null;
+  }
+
+  try {
+    await prisma.appSnapshot.create({
+      data: { userId, data: snapshot, updatedAt }
+    });
+    return updatedAt;
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") return null;
+    throw error;
+  }
+}
+
+function parseBaseUpdatedAt(value: unknown) {
+  if (typeof value !== "string" || !value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+// Best effort: counters live per server instance, so on serverless this slows attacks but is not a hard limit.
+const loginFailures = new Map<string, { count: number; firstAt: number }>();
+
+function clientAddress(request: NextRequest) {
+  return request.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
+    || request.headers.get("x-real-ip")
+    || "unknown";
+}
+
+function isLoginBlocked(key: string) {
+  const entry = loginFailures.get(key);
+  if (!entry) return false;
+  if (Date.now() - entry.firstAt > LOGIN_WINDOW_MS) {
+    loginFailures.delete(key);
+    return false;
+  }
+  return entry.count >= LOGIN_MAX_FAILURES;
+}
+
+function registerLoginFailure(key: string) {
+  const now = Date.now();
+  const entry = loginFailures.get(key);
+  if (!entry || now - entry.firstAt > LOGIN_WINDOW_MS) {
+    loginFailures.set(key, { count: 1, firstAt: now });
+  } else {
+    entry.count += 1;
+  }
+  if (loginFailures.size > 5000) {
+    for (const [storedKey, stored] of loginFailures) {
+      if (now - stored.firstAt > LOGIN_WINDOW_MS) loginFailures.delete(storedKey);
+    }
+  }
 }
 
 function sessionPayload(session: { userId: string; username: string }) {
@@ -137,7 +226,7 @@ function userPayload(session: { userId: string; username: string }) {
     id: session.userId,
     name: session.username,
     username: session.username,
-    email: `${session.username.toLowerCase()}@swallet.local`,
+    email: loginEmailFor(session.username),
     role: "admin",
     status: "activo",
     permissions: ["read", "write", "delete", "admin"]
@@ -165,7 +254,7 @@ async function verifyToken(token: string, type: "access" | "refresh") {
     return null;
   }
   if (payload.type !== type || payload.exp < Math.floor(Date.now() / 1000)) return null;
-  if (!allowedUsername(payload.username)) return null;
+  if (!matchAllowedUsername(payload.username)) return null;
 
   return { userId: payload.userId, username: payload.username };
 }
@@ -189,35 +278,24 @@ function safeEqual(a: string, b: string) {
 }
 
 function tokenSecret() {
-  return process.env.AUTH_SECRET || process.env.JWT_ACCESS_SECRET || "swallet-local-secret-change-me";
+  const secret = process.env.AUTH_SECRET?.trim() || process.env.JWT_ACCESS_SECRET?.trim();
+  if (!secret) {
+    throw new LoginConfigError("AUTH_SECRET no esta configurada: no se pueden firmar ni validar sesiones.");
+  }
+  return secret;
 }
 
-function allowedUsers() {
-  return (process.env.ALLOWED_LOGIN_USERS || DEFAULT_USERS.join(","))
-    .split(",")
-    .map((user) => user.trim())
-    .filter(Boolean);
-}
-
-function allowedPassword() {
-  return process.env.ALLOWED_LOGIN_PASSWORD?.trim() || DEFAULT_PASSWORD;
-}
-
-function allowedUsername(credential: string) {
-  return allowedUsers().find((username) => username.toLowerCase() === credential.toLowerCase()) || null;
-}
-
-function sanitizeSnapshot(snapshot: unknown) {
+function sanitizeSnapshot(snapshot: unknown): Prisma.InputJsonObject {
   if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) {
     return {};
   }
   return {
-    ...(snapshot as Record<string, unknown>),
+    ...(snapshot as Prisma.InputJsonObject),
     savedAt: new Date().toISOString()
   };
 }
 
-function userIdFor(username: string) {
+function userIdFor(_username: string) {
   return SHARED_SNAPSHOT_USER_ID;
 }
 
@@ -265,16 +343,27 @@ function unauthorizedError() {
 class AuthError extends Error {}
 
 function json(payload: unknown, status = 200) {
-  return NextResponse.json(payload, {
-    status,
-    headers: corsHeaders()
-  });
+  return NextResponse.json(payload, { status });
 }
 
-function corsHeaders() {
-  return {
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization",
-    "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS"
-  };
+// The app is served from the same origin as the API in production, so CORS is only opened
+// for explicitly allowed origins (API_CORS_ORIGINS) or, in development, for Live Server.
+function withCors(request: NextRequest, response: NextResponse) {
+  const origin = request.headers.get("origin");
+  if (origin && allowedCorsOrigins().includes(origin)) {
+    response.headers.set("Access-Control-Allow-Origin", origin);
+    response.headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    response.headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
+    response.headers.set("Vary", "Origin");
+  }
+  return response;
+}
+
+function allowedCorsOrigins() {
+  const configured = (process.env.API_CORS_ORIGINS || "")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+  if (configured.length) return configured;
+  return process.env.NODE_ENV === "production" ? [] : DEV_CORS_ORIGINS;
 }

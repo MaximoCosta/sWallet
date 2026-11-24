@@ -2,14 +2,12 @@ import NextAuth, { type NextAuthConfig } from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import type { Role } from "@prisma/client";
 import { z } from "zod";
+import { isValidLoginPassword, LoginConfigError, loginEmailFor, matchAllowedUsername } from "@/lib/login-credentials";
 
 const credentialsSchema = z.object({
   credential: z.string().min(3).max(80),
   password: z.string().min(8)
 });
-
-const DEFAULT_LOGIN_PASSWORD = "LiamVillero123";
-const DEFAULT_LOGIN_USERS = ["FranPernil", "MaxiTaxi"];
 
 export const authConfig = {
   session: {
@@ -34,7 +32,7 @@ export const authConfig = {
 
         return {
           id: normalizeCredential(allowedUsername),
-          email: `${normalizeCredential(allowedUsername)}@swallet.local`,
+          email: loginEmailFor(allowedUsername),
           name: allowedUsername,
           image: null,
           role: "admin"
@@ -62,16 +60,17 @@ export const authConfig = {
 export const { handlers, auth, signIn, signOut } = NextAuth(authConfig);
 
 function resolveAllowedUsername(credential: string, password: string) {
-  const allowedPassword = process.env.ALLOWED_LOGIN_PASSWORD?.trim() || DEFAULT_LOGIN_PASSWORD;
-  if (password.trim() !== allowedPassword) return null;
+  try {
+    if (!isValidLoginPassword(password)) return null;
+  } catch (error) {
+    if (error instanceof LoginConfigError) {
+      console.error(error.message);
+      return null;
+    }
+    throw error;
+  }
 
-  const normalizedCredential = normalizeCredential(credential);
-  const allowedUsers = (process.env.ALLOWED_LOGIN_USERS || DEFAULT_LOGIN_USERS.join(","))
-    .split(",")
-    .map((user) => user.trim())
-    .filter(Boolean);
-
-  return allowedUsers.find((user) => normalizeCredential(user) === normalizedCredential) ?? null;
+  return matchAllowedUsername(credential);
 }
 
 function normalizeCredential(value: string) {

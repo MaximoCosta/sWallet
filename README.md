@@ -25,6 +25,8 @@ ALLOWED_LOGIN_USERS="FranPernil,MaxiTaxi"
 ALLOWED_LOGIN_PASSWORD="clave-privada"
 ```
 
+`AUTH_SECRET` y `ALLOWED_LOGIN_PASSWORD` son obligatorias: si faltan, la API responde 503 en el login y no se puede entrar (no hay valores por defecto en el codigo). `API_CORS_ORIGINS` es opcional y solo hace falta si el frontend se sirve desde otro dominio.
+
 Usar en `DATABASE_URL` la URL con pooler y `?pgbouncer=true`. Usar en `DIRECT_URL` la URL para migraciones que muestra Supabase.
 
 Crear las tablas en Supabase con Prisma:
@@ -100,7 +102,9 @@ Los formularios validan campos obligatorios, emails, URLs, montos minimos/maximo
 
 ## Persistencia
 
-La base usa Prisma sobre Supabase Postgres. La tabla `AppSnapshot` guarda el estado completo del dashboard por usuario, conservando `schemaVersion` y las migraciones automaticas de `js/storage.js`.
+La base usa Prisma sobre Supabase Postgres. La tabla `AppSnapshot` guarda el estado completo del dashboard (un unico snapshot compartido por todos los usuarios), conservando `schemaVersion` y las migraciones automaticas de `js/storage.js`.
+
+Cada `PUT /api/v1/state` envia `baseUpdatedAt` (la version que el navegador vio por ultima vez). Si otro usuario guardo antes, la API responde `409` con la version actual y el navegador combina ambas versiones (`js/sync-merge.js`, fusion de tres vias por registro y por campo): los cambios en registros o campos distintos se suman sin perder nada. Si los dos cambiaron el mismo campo queda el valor propio, y la diferencia se lista en `Configuracion > Persistencia` para elegir "Usar el del otro". Si uno elimino un registro que el otro edito, se conserva y se ofrece "Eliminar igualmente". Si la fusion falla 5 veces seguidas, se carga la version del servidor y la propia queda como respaldo descargable en la misma pantalla. Si el guardado falla por red, se reintenta cada 15 s y el navegador avisa antes de cerrar la pestana con cambios sin sincronizar.
 
 Documentacion tecnica nueva:
 

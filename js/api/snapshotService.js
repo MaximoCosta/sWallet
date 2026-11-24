@@ -5,10 +5,10 @@ export const snapshotService = {
     return apiRequest("/state");
   },
 
-  async save(snapshot) {
+  async save(snapshot, baseUpdatedAt) {
     return apiRequest("/state", {
       method: "PUT",
-      body: { snapshot }
+      body: { snapshot, baseUpdatedAt: baseUpdatedAt || null }
     });
   }
 };

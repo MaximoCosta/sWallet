@@ -1,7 +1,7 @@
 import { canDelete, canWrite, login, logout } from "./auth.js";
 import { filteredInvoices, projectExists, clientExists } from "./finance.js";
 import { createRecord, parseDate, state, toInputDate } from "./state.js";
-import { saveState, resetStorage } from "./storage.js";
+import { clearConflictBackup, dismissAllSyncConflicts, readConflictBackup, resolveSyncConflict, saveState, resetStorage } from "./storage.js";
 import {
   closeMobileMenu,
   dom,
@@ -38,6 +38,7 @@ import {
 } from "./render.js";
 
 export function bindEvents() {
+  document.getElementById("syncConflictList")?.addEventListener("click", handleSyncConflictClick);
   dom.loginForm.addEventListener("submit", handleLogin);
   dom.logoutButton.addEventListener("click", async () => {
     await logout();
@@ -1562,4 +1563,47 @@ function debounce(callback, delay) {
     clearTimeout(timeout);
     timeout = setTimeout(() => callback(...args), delay);
   };
+}
+
+function handleSyncConflictClick(event) {
+  const button = event.target.closest("button");
+  if (!button) return;
+
+  if (button.dataset.syncDismissAll) {
+    dismissAllSyncConflicts();
+    renderAll();
+    notify("Diferencias revisadas", "Se mantuvieron tus valores.");
+    return;
+  }
+
+  if (button.dataset.syncBackup === "download") {
+    const backup = readConflictBackup();
+    if (!backup) return;
+    const url = URL.createObjectURL(new Blob([backup], { type: "application/json" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `swallet-respaldo-conflicto-${new Date().toISOString().slice(0, 10)}.json`;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    return;
+  }
+
+  if (button.dataset.syncBackup === "discard") {
+    if (!confirm("Se borrara el respaldo guardado en este navegador. Continuar?")) return;
+    clearConflictBackup();
+    renderAll();
+    return;
+  }
+
+  const key = button.dataset.syncConflict;
+  const choice = button.dataset.syncChoice;
+  if (!key || !choice) return;
+  if (choice !== "keep" && !canWrite()) {
+    notify("Solo lectura", "Tu rol no permite modificar datos.");
+    return;
+  }
+  if (choice === "delete" && !confirm("Eliminar este registro?")) return;
+  const applied = resolveSyncConflict(key, choice);
+  renderAll();
+  if (!applied) notify("Sin cambios", "El registro ya no existe; se descarto la diferencia.");
 }
