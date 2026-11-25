@@ -1,30 +1,30 @@
-import { createHmac, timingSafeEqual } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { isValidLoginPassword, LoginConfigError, loginEmailFor, matchAllowedUsername } from "@/lib/login-credentials";
 import {
   accessFor,
-  AppUserError,
-  type AppUserRole,
+  AccountError,
+  type AppAccount,
+  AuthConfigError,
+  accountFromToken,
   canWriteRole,
-  changeOwnPassword,
-  createAppUser,
-  deleteAppUser,
-  findActiveUserByCredential,
-  listAppUsers,
-  type PublicAppUser,
-  toPublicUser,
-  updateAppUser,
-  verifyDatabaseLogin
-} from "@/lib/app-users";
-import { addComment, createTask, deleteTask, getTaskWithEvents, isTaskManager, listAssignees, listTasks, TaskError, updateTask } from "@/lib/app-tasks";
+  changePassword,
+  createAccount,
+  deleteAccount,
+  listAccounts,
+  refreshSession,
+  signInWithPassword,
+  signOut,
+  type AuthTokens,
+  updateAccount
+} from "@/lib/supabase-auth";
+import { runMigrations } from "@/lib/migrations";
+import { addComment, createTask, deleteTask, getTaskWithEvents, listAssignees, listTasks, TaskError, updateTask } from "@/lib/app-tasks";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const ACCESS_TTL_SECONDS = 15 * 60;
-const REFRESH_TTL_SECONDS = 7 * 24 * 60 * 60;
+// Everyone works on the same company data, so the snapshot has a single fixed key.
 const SHARED_SNAPSHOT_USER_ID = "shared";
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 const LOGIN_MAX_FAILURES = 10;
@@ -32,20 +32,6 @@ const DEV_CORS_ORIGINS = ["http://localhost:5500", "http://127.0.0.1:5500"];
 
 type RouteContext = {
   params: Promise<{ path?: string[] }>;
-};
-
-type Session = {
-  userId: string;
-  username: string;
-  role: AppUserRole;
-  profile: PublicAppUser | null;
-};
-
-type TokenPayload = {
-  userId: string;
-  username: string;
-  type: "access" | "refresh";
-  exp: number;
 };
 
 export async function GET(request: NextRequest, context: RouteContext) {
@@ -82,7 +68,7 @@ async function route(request: NextRequest, context: RouteContext) {
     const method = request.method.toUpperCase();
 
     if (method === "GET" && path === "") {
-      return json({ ok: true, service: "sWallet Supabase API" });
+      return json({ ok: true, service: "sWallet API", auth: "supabase" });
     }
 
     if (method === "POST" && path === "auth/login") {
@@ -91,35 +77,40 @@ async function route(request: NextRequest, context: RouteContext) {
     }
 
     if (method === "GET" && path === "auth/me") {
-      const session = await requireSession(request, "access");
-      return json({ user: userPayload(session) });
+      const account = await requireAccount(request);
+      return json({ user: userPayload(account) });
     }
 
     if (method === "POST" && path === "auth/refresh") {
       const body = await readJson(request);
-      const session = await verifyToken(String(body.refreshToken || ""), "refresh");
+      const session = await refreshSession(String(body.refreshToken || ""));
       if (!session) return unauthorized("Sesion expirada. Inicia sesion nuevamente.");
-      return json(sessionPayload(session));
+      return json(sessionPayload(session.account, session.tokens));
+    }
+
+    if (method === "POST" && path === "auth/logout") {
+      const token = bearerToken(request);
+      if (token) await signOut(token);
+      return json({ ok: true });
     }
 
     if (method === "POST" && path === "auth/password") {
-      const session = await requireSession(request, "access");
+      const account = await requireAccount(request);
       const body = await readJson(request);
-      await changeOwnPassword(session.username, String(body.currentPassword || ""), String(body.newPassword || ""));
+      await changePassword(account, String(body.currentPassword || ""), String(body.newPassword || ""));
       return json({ ok: true });
     }
 
     if (path === "tasks" || path.startsWith("tasks/")) {
-      const session = await requireSession(request, "access");
-      const actor = { username: session.username, name: session.profile?.name || session.username };
+      const account = await requireAccount(request);
+      const actor = { id: account.id, email: account.email, name: account.name, isManager: account.isTaskManager };
       const [, id, sub] = path.split("/");
 
       if (method === "GET" && path === "tasks") {
-        const manager = isTaskManager(session.username);
         return json({
           tasks: await listTasks(actor),
-          isManager: manager,
-          assignees: manager ? await listAssignees() : []
+          isManager: account.isTaskManager,
+          assignees: account.isTaskManager ? await listAssignees() : []
         });
       }
       if (method === "POST" && path === "tasks") return json(await createTask(actor, await readJson(request)), 201);
@@ -133,43 +124,40 @@ async function route(request: NextRequest, context: RouteContext) {
     }
 
     if (path === "users" || path.startsWith("users/")) {
-      const session = await requireSession(request, "access");
-      if (session.role !== "admin") return json({ message: "Solo un admin puede administrar usuarios." }, 403);
+      const account = await requireAccount(request);
+      if (account.role !== "admin") return json({ message: "Solo un admin puede administrar usuarios." }, 403);
       const id = path.slice("users/".length);
 
-      if (method === "GET" && path === "users") return json({ users: await listAppUsers() });
+      if (method === "GET" && path === "users") return json({ users: (await listAccounts({ fresh: true })).map(publicAccount) });
       if (method === "POST" && path === "users") {
-        return json({ user: await createAppUser(await readJson(request)) }, 201);
+        return json({ user: publicAccount(await createAccount(await readJson(request))) }, 201);
       }
       if (method === "PATCH" && id) {
-        if (id === session.profile?.id) {
+        const body = await readJson(request);
+        if (id === account.id && (body.role !== undefined || body.status !== undefined)) {
           return json({ message: "No puedes cambiar tu propio rol o estado." }, 400);
         }
-        return json({ user: await updateAppUser(id, await readJson(request)) });
+        return json({ user: publicAccount(await updateAccount(id, body)) });
       }
       if (method === "DELETE" && id) {
-        if (id === session.profile?.id) return json({ message: "No puedes eliminar tu propio usuario." }, 400);
-        await deleteAppUser(id);
+        if (id === account.id) return json({ message: "No puedes eliminar tu propio usuario." }, 400);
+        await deleteAccount(id);
         return json({ ok: true });
       }
     }
 
-    if (method === "POST" && path === "auth/logout") {
-      return json({ ok: true });
-    }
-
     if (method === "GET" && path === "state") {
-      const session = await requireSession(request, "access");
+      await requireAccount(request);
       await ensureSnapshotTable();
       const snapshot = await prisma.appSnapshot.findUnique({
-        where: { userId: session.userId }
+        where: { userId: SHARED_SNAPSHOT_USER_ID }
       });
       return json({ snapshot: snapshot?.data ?? null, updatedAt: snapshot?.updatedAt ?? null });
     }
 
     if ((method === "POST" || method === "PUT") && path === "state") {
-      const session = await requireSession(request, "access");
-      if (!canWriteRole(session.role)) {
+      const account = await requireAccount(request);
+      if (!canWriteRole(account.role)) {
         return json({ message: "Tu usuario es de solo lectura: no puede guardar cambios." }, 403);
       }
       const body = await readJson(request);
@@ -177,10 +165,10 @@ async function route(request: NextRequest, context: RouteContext) {
       const baseUpdatedAt = parseBaseUpdatedAt(body.baseUpdatedAt);
       await ensureSnapshotTable();
 
-      const savedAt = await saveSnapshot(session.userId, snapshot, baseUpdatedAt);
+      const savedAt = await saveSnapshot(SHARED_SNAPSHOT_USER_ID, snapshot, baseUpdatedAt);
       if (!savedAt) {
         const current = await prisma.appSnapshot.findUnique({
-          where: { userId: session.userId }
+          where: { userId: SHARED_SNAPSHOT_USER_ID }
         });
         return json({
           message: "Otro usuario guardo cambios antes. Se cargo la version mas reciente.",
@@ -193,15 +181,15 @@ async function route(request: NextRequest, context: RouteContext) {
 
     return json({ message: "Ruta no encontrada." }, 404);
   } catch (error) {
-    if (error instanceof AppUserError || error instanceof TaskError) {
+    if (error instanceof AccountError || error instanceof TaskError) {
       return json({ message: error.message }, error.status);
     }
     if (error instanceof AuthError) {
       return unauthorized(error.message);
     }
-    if (error instanceof LoginConfigError) {
+    if (error instanceof AuthConfigError) {
       console.error(error.message);
-      return json({ message: "El servidor no tiene configurado el acceso. Contacta al administrador." }, 503);
+      return json({ message: "El servidor no tiene configurado el acceso (Supabase Auth). Contacta al administrador." }, 503);
     }
     console.error(error);
     const code = errorCode(error);
@@ -216,43 +204,17 @@ async function login(request: NextRequest) {
   }
 
   const body = await readJson(request);
-  const credential = String(body.credential || body.email || body.username || "").trim();
+  const email = String(body.email || body.credential || "").trim();
   const password = String(body.password || "");
-  tokenSecret(); // fail closed before issuing tokens if the signing secret is missing
 
-  const session = await authenticate(credential, password);
+  const session = await signInWithPassword(email, password);
   if (!session) {
     registerLoginFailure(clientKey);
-    return unauthorized("Usuario o contrasena incorrectos.");
+    return unauthorized("Email o contraseña incorrectos.");
   }
 
   loginFailures.delete(clientKey);
-  return json(sessionPayload(session));
-}
-
-// Users in ALLOWED_LOGIN_USERS use the shared password; everyone else is looked up in AppLoginUser.
-async function authenticate(credential: string, password: string): Promise<Session | null> {
-  const envUsername = matchAllowedUsername(credential);
-  if (envUsername) {
-    return isValidLoginPassword(password) ? envSession(envUsername) : null;
-  }
-  const user = await verifyDatabaseLogin(credential, password);
-  return user ? databaseSession(toPublicUser(user)) : null;
-}
-
-async function resolveSession(username: string): Promise<Session | null> {
-  const envUsername = matchAllowedUsername(username);
-  if (envUsername) return envSession(envUsername);
-  const user = await findActiveUserByCredential(username);
-  return user ? databaseSession(toPublicUser(user)) : null;
-}
-
-function envSession(username: string): Session {
-  return { userId: userIdFor(username), username, role: "admin", profile: null };
-}
-
-function databaseSession(profile: PublicAppUser): Session {
-  return { userId: userIdFor(profile.username), username: profile.username, role: profile.role, profile };
+  return json(sessionPayload(session.account, session.tokens));
 }
 
 // Optimistic concurrency: a write only lands if the client saw the latest version.
@@ -319,86 +281,60 @@ function registerLoginFailure(key: string) {
   }
 }
 
-function sessionPayload(session: Session) {
-  const claims = { userId: session.userId, username: session.username };
+
+function sessionPayload(account: AppAccount, tokens: AuthTokens) {
+  return { user: userPayload(account), ...tokens };
+}
+
+// Shape the static app expects (js/auth.js). id stays the shared snapshot key; accountId is the Supabase user.
+function userPayload(account: AppAccount) {
   return {
-    user: userPayload(session),
-    accessToken: createToken({ ...claims, type: "access" }, ACCESS_TTL_SECONDS),
-    refreshToken: createToken({ ...claims, type: "refresh" }, REFRESH_TTL_SECONDS),
-    expiresAt: new Date(Date.now() + ACCESS_TTL_SECONDS * 1000).toISOString()
+    id: SHARED_SNAPSHOT_USER_ID,
+    accountId: account.id,
+    name: account.name,
+    username: account.email,
+    email: account.email,
+    role: account.role,
+    status: account.status,
+    permissions: accessFor(account.role),
+    modules: account.modules,
+    ...(account.phone ? { phone: account.phone } : {}),
+    ...(account.area ? { area: account.area } : {}),
+    ...(account.avatar ? { avatar: account.avatar } : {}),
+    passwordManagedBy: "user",
+    canAssignTasks: account.isTaskManager
   };
 }
 
-function userPayload(session: Session) {
-  const profile = session.profile;
+function publicAccount(account: AppAccount) {
   return {
-    id: session.userId,
-    accountId: profile?.id ?? `env:${session.username.toLowerCase()}`,
-    name: profile?.name || session.username,
-    username: session.username,
-    email: profile?.email || loginEmailFor(session.username),
-    role: session.role,
-    status: "activo",
-    permissions: accessFor(session.role),
-    modules: profile?.permissions ?? [],
-    ...(profile?.phone ? { phone: profile.phone } : {}),
-    ...(profile?.area ? { area: profile.area } : {}),
-    ...(profile?.avatar ? { avatar: profile.avatar } : {}),
-    passwordManagedBy: profile ? "user" : "server",
-    canAssignTasks: isTaskManager(session.username)
+    id: account.id,
+    email: account.email,
+    name: account.name,
+    role: account.role,
+    status: account.status,
+    permissions: account.modules,
+    phone: account.phone,
+    area: account.area,
+    notes: account.notes,
+    avatar: account.avatar,
+    isTaskManager: account.isTaskManager,
+    createdAt: account.createdAt,
+    lastSignInAt: account.lastSignInAt
   };
 }
 
-async function requireSession(request: NextRequest, type: "access" | "refresh") {
-  const header = request.headers.get("authorization") || "";
-  const match = header.match(/^Bearer\s+(.+)$/i);
-  if (!match) throw unauthorizedError();
-  const session = await verifyToken(match[1], type);
-  if (!session) throw unauthorizedError();
-  return session;
+function bearerToken(request: NextRequest) {
+  const match = (request.headers.get("authorization") || "").match(/^Bearer\s+(.+)$/i);
+  return match ? match[1].trim() : "";
 }
 
-async function verifyToken(token: string, type: "access" | "refresh") {
-  const [encodedPayload, signature] = token.split(".");
-  if (!encodedPayload || !signature) return null;
-  if (!safeEqual(signature, sign(encodedPayload))) return null;
-
-  let payload: TokenPayload;
-  try {
-    payload = JSON.parse(Buffer.from(encodedPayload, "base64url").toString("utf8")) as TokenPayload;
-  } catch {
-    return null;
-  }
-  if (payload.type !== type || payload.exp < Math.floor(Date.now() / 1000)) return null;
-
-  // Re-read the account on every request: a deactivated or deleted user loses access right away.
-  return resolveSession(String(payload.username || ""));
-}
-
-function createToken(payload: Omit<TokenPayload, "exp">, ttlSeconds: number) {
-  const encodedPayload = Buffer.from(JSON.stringify({
-    ...payload,
-    exp: Math.floor(Date.now() / 1000) + ttlSeconds
-  })).toString("base64url");
-  return `${encodedPayload}.${sign(encodedPayload)}`;
-}
-
-function sign(value: string) {
-  return createHmac("sha256", tokenSecret()).update(value).digest("base64url");
-}
-
-function safeEqual(a: string, b: string) {
-  const left = Buffer.from(a);
-  const right = Buffer.from(b);
-  return left.length === right.length && timingSafeEqual(left, right);
-}
-
-function tokenSecret() {
-  const secret = process.env.AUTH_SECRET?.trim() || process.env.JWT_ACCESS_SECRET?.trim();
-  if (!secret) {
-    throw new LoginConfigError("AUTH_SECRET no esta configurada: no se pueden firmar ni validar sesiones.");
-  }
-  return secret;
+async function requireAccount(request: NextRequest) {
+  const token = bearerToken(request);
+  if (!token) throw unauthorizedError();
+  const account = await accountFromToken(token);
+  if (!account) throw unauthorizedError();
+  return account;
 }
 
 function sanitizeSnapshot(snapshot: unknown): Prisma.InputJsonObject {
@@ -411,14 +347,11 @@ function sanitizeSnapshot(snapshot: unknown): Prisma.InputJsonObject {
   };
 }
 
-function userIdFor(_username: string) {
-  return SHARED_SNAPSHOT_USER_ID;
-}
-
 let snapshotTableReady = false;
 
 async function ensureSnapshotTable() {
   if (snapshotTableReady) return;
+  await runMigrations();
   await prisma.$executeRawUnsafe(`
     CREATE TABLE IF NOT EXISTS "AppSnapshot" (
       "id" TEXT PRIMARY KEY,

@@ -2,10 +2,10 @@ import NextAuth, { type NextAuthConfig } from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import type { Role } from "@prisma/client";
 import { z } from "zod";
-import { isValidLoginPassword, LoginConfigError, loginEmailFor, matchAllowedUsername } from "@/lib/login-credentials";
+import { AuthConfigError, signInWithPassword } from "@/lib/supabase-auth";
 
 const credentialsSchema = z.object({
-  credential: z.string().min(3).max(80),
+  credential: z.string().email().max(120),
   password: z.string().min(8)
 });
 
@@ -20,22 +20,22 @@ export const authConfig = {
     Credentials({
       name: "Credentials",
       credentials: {
-        credential: { label: "Usuario", type: "text" },
+        credential: { label: "Email", type: "email" },
         password: { label: "Password", type: "password" }
       },
       async authorize(rawCredentials) {
         const parsed = credentialsSchema.safeParse(rawCredentials);
         if (!parsed.success) return null;
 
-        const allowedUsername = resolveAllowedUsername(parsed.data.credential, parsed.data.password);
-        if (!allowedUsername) return null;
+        const account = await signInSupabase(parsed.data.credential, parsed.data.password);
+        if (!account) return null;
 
         return {
-          id: normalizeCredential(allowedUsername),
-          email: loginEmailFor(allowedUsername),
-          name: allowedUsername,
-          image: null,
-          role: "admin"
+          id: account.id,
+          email: account.email,
+          name: account.name,
+          image: account.avatar || null,
+          role: account.role
         };
       }
     })
@@ -59,22 +59,18 @@ export const authConfig = {
 
 export const { handlers, auth, signIn, signOut } = NextAuth(authConfig);
 
-function resolveAllowedUsername(credential: string, password: string) {
+// Same accounts as the static app: Supabase Auth email + password.
+async function signInSupabase(email: string, password: string) {
   try {
-    if (!isValidLoginPassword(password)) return null;
+    const session = await signInWithPassword(email, password);
+    return session?.account ?? null;
   } catch (error) {
-    if (error instanceof LoginConfigError) {
+    if (error instanceof AuthConfigError) {
       console.error(error.message);
       return null;
     }
     throw error;
   }
-
-  return matchAllowedUsername(credential);
-}
-
-function normalizeCredential(value: string) {
-  return value.trim().toLowerCase();
 }
 
 function resolveRole(role: unknown): Role {

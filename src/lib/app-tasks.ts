@@ -1,18 +1,19 @@
 // Assigned tasks: task managers (TASK_MANAGER_USERS, Maxi by default) create tasks for the team;
 // every other user only sees the tasks assigned to them and moves them between statuses.
-// Tables are created on demand, like AppSnapshot and AppLoginUser.
+// People are Supabase Auth accounts: assignee, createdBy and event authors hold the account id.
+// Tables are created on demand, like AppSnapshot.
 import { randomUUID } from "crypto";
 import { prisma } from "@/lib/prisma";
-import { listAppUsers } from "@/lib/app-users";
+import { listAccounts } from "@/lib/supabase-auth";
+import { runMigrations } from "@/lib/migrations";
 
 export const TASK_STATUSES = ["asignada", "en_proceso", "completada"] as const;
 export const TASK_PRIORITIES = ["baja", "media", "alta", "urgente"] as const;
-const DEFAULT_TASK_MANAGERS = ["MaxiTaxi", "maximonewp@gmail.com"];
 
 export type TaskStatus = (typeof TASK_STATUSES)[number];
 export type TaskPriority = (typeof TASK_PRIORITIES)[number];
 
-export type Actor = { username: string; name: string };
+export type Actor = { id: string; email: string; name: string; isManager: boolean };
 
 type TaskRow = {
   id: string;
@@ -48,21 +49,11 @@ export class TaskError extends Error {
   }
 }
 
-export function taskManagers() {
-  return (process.env.TASK_MANAGER_USERS || DEFAULT_TASK_MANAGERS.join(","))
-    .split(",")
-    .map((user) => user.trim().toLowerCase())
-    .filter(Boolean);
-}
-
-export function isTaskManager(username: string) {
-  return taskManagers().includes(username.trim().toLowerCase());
-}
-
 let tablesReady = false;
 
 async function ensureTaskTables() {
   if (tablesReady) return;
+  await runMigrations();
   await prisma.$executeRawUnsafe(`
     CREATE TABLE IF NOT EXISTS "AppTask" (
       "id" TEXT PRIMARY KEY,
@@ -97,39 +88,37 @@ async function ensureTaskTables() {
   tablesReady = true;
 }
 
-/** People a task can be assigned to: every active account, server-defined or created in the app. */
+/** People a task can be assigned to: every active Supabase account. */
 export async function listAssignees() {
-  const users = await listAppUsers();
-  return users
-    .filter((user) => user.status === "activo")
-    .map((user) => ({
-      username: user.username.toLowerCase(),
-      name: user.name,
-      email: user.email,
-      role: user.role,
-      isManager: isTaskManager(user.username)
+  const accounts = await listAccounts();
+  return accounts
+    .filter((account) => account.status === "activo")
+    .map((account) => ({
+      id: account.id,
+      name: account.name,
+      email: account.email,
+      role: account.role,
+      isManager: account.isTaskManager
     }));
 }
 
 export async function listTasks(actor: Actor) {
   await ensureTaskTables();
-  const manager = isTaskManager(actor.username);
-  const me = actor.username.toLowerCase();
-  const rows = manager
+  const rows = actor.isManager
     ? await prisma.$queryRaw<TaskRow[]>`
         SELECT t.*, (SELECT COUNT(*) FROM "AppTaskEvent" e WHERE e."taskId" = t."id" AND e."kind" = 'comment') AS "commentCount"
         FROM "AppTask" t ORDER BY t."createdAt" DESC`
     : await prisma.$queryRaw<TaskRow[]>`
         SELECT t.*, (SELECT COUNT(*) FROM "AppTaskEvent" e WHERE e."taskId" = t."id" AND e."kind" = 'comment') AS "commentCount"
-        FROM "AppTask" t WHERE t."assignee" = ${me} ORDER BY t."createdAt" DESC`;
+        FROM "AppTask" t WHERE t."assignee" = ${actor.id} ORDER BY t."createdAt" DESC`;
   const names = await accountNames();
   return rows.map((row) => toPublicTask(row, names));
 }
 
-// username -> display name, so every viewer sees "Maxi" instead of "maxitaxi" (members do not get the assignee list).
+// account id -> display name, so members (who do not get the assignee list) still see names.
 async function accountNames() {
-  const users = await listAppUsers();
-  return new Map(users.map((user) => [user.username.toLowerCase(), user.name || user.username]));
+  const accounts = await listAccounts();
+  return new Map(accounts.map((account) => [account.id, account.name || account.email]));
 }
 
 export async function getTaskWithEvents(actor: Actor, id: string) {
@@ -149,7 +138,7 @@ export async function createTask(actor: Actor, input: Record<string, unknown>) {
   await prisma.$executeRaw`
     INSERT INTO "AppTask" ("id", "title", "description", "assignee", "priority", "status", "dueDate", "createdBy")
     VALUES (${id}, ${title}, ${cleanDescription(input.description)}, ${assignee}, ${cleanPriority(input.priority)},
-            'asignada', ${cleanDueDate(input.dueDate)}::date, ${actor.username.toLowerCase()})
+            'asignada', ${cleanDueDate(input.dueDate)}::date, ${actor.id})
   `;
   await addEvent(id, actor, "created", null, null, "asignada");
   return getTaskWithEvents(actor, id);
@@ -157,7 +146,7 @@ export async function createTask(actor: Actor, input: Record<string, unknown>) {
 
 export async function updateTask(actor: Actor, id: string, input: Record<string, unknown>) {
   const current = await getVisibleTask(actor, id);
-  const manager = isTaskManager(actor.username);
+  const manager = actor.isManager;
 
   if (!manager) {
     const editsOtherFields = ["title", "description", "assignee", "priority", "dueDate"].some((key) => input[key] !== undefined);
@@ -213,7 +202,8 @@ export async function updateTask(actor: Actor, id: string, input: Record<string,
   `;
   if (statusChanged) await addEvent(id, actor, "status", null, current.status, status);
   if (changes.length) {
-    const reassigned = changes.includes("responsable") ? ` Nuevo responsable: @${assignee}.` : "";
+    const names = await accountNames();
+    const reassigned = changes.includes("responsable") ? ` Nuevo responsable: ${names.get(assignee) ?? "otra persona"}.` : "";
     await addEvent(id, actor, "edited", `Cambió ${changes.join(", ")}.${reassigned}`, null, null);
   }
   return getTaskWithEvents(actor, id);
@@ -238,7 +228,7 @@ async function getVisibleTask(actor: Actor, id: string) {
   await ensureTaskTables();
   const rows = await prisma.$queryRaw<TaskRow[]>`SELECT * FROM "AppTask" WHERE "id" = ${id} LIMIT 1`;
   const task = rows[0];
-  const visible = task && (isTaskManager(actor.username) || task.assignee === actor.username.toLowerCase());
+  const visible = task && (actor.isManager || task.assignee === actor.id);
   if (!visible) throw new TaskError("Tarea no encontrada.", 404);
   return task;
 }
@@ -246,22 +236,22 @@ async function getVisibleTask(actor: Actor, id: string) {
 async function addEvent(taskId: string, actor: Actor, kind: string, body: string | null, fromStatus: string | null, toStatus: string | null) {
   await prisma.$executeRaw`
     INSERT INTO "AppTaskEvent" ("id", "taskId", "author", "authorName", "kind", "body", "fromStatus", "toStatus")
-    VALUES (${randomUUID()}, ${taskId}, ${actor.username.toLowerCase()}, ${actor.name || actor.username}, ${kind}, ${body}, ${fromStatus}, ${toStatus})
+    VALUES (${randomUUID()}, ${taskId}, ${actor.id}, ${actor.name || actor.email}, ${kind}, ${body}, ${fromStatus}, ${toStatus})
   `;
 }
 
 function assertManager(actor: Actor) {
-  if (!isTaskManager(actor.username)) throw new TaskError("Solo Maxi puede crear, editar o eliminar tareas.", 403);
+  if (!actor.isManager) throw new TaskError("Solo Maxi puede crear, editar o eliminar tareas.", 403);
 }
 
 async function cleanAssignee(value: unknown) {
-  const username = String(value ?? "").trim().toLowerCase();
-  if (!username) throw new TaskError("Elegí a quién se asigna la tarea.");
+  const id = String(value ?? "").trim();
+  if (!id) throw new TaskError("Elegí a quién se asigna la tarea.");
   const assignees = await listAssignees();
-  if (!assignees.some((item) => item.username === username)) {
+  if (!assignees.some((item) => item.id === id)) {
     throw new TaskError("El responsable elegido no existe o está inactivo.");
   }
-  return username;
+  return id;
 }
 
 function cleanTitle(value: unknown) {

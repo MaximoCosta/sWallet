@@ -120,6 +120,7 @@ export function renderAuth() {
   document.body.classList.toggle("read-only", !canWrite());
 }
 
+const MODULE_LABELS = { clients: "Clientes", finance: "Finanzas", projects: "Proyectos", reports: "Reportes", settings: "Configuración" };
 const ALERT_TONE_LABELS = { vencida: "Vencida", pendiente: "Próxima", neutral: "Seguimiento", coral: "Urgente" };
 const ROLE_LABELS = { admin: "Admin", finanzas: "Finanzas", solo_lectura: "Solo lectura" };
 
@@ -662,7 +663,7 @@ function renderSettings() {
   const user = currentUser();
   syncCompanySettingsForm();
   dom.settingsSession.innerHTML = `
-    <article class="list-item account-profile-item"><div class="user-avatar large" data-session-avatar>${avatarMarkup(user)}</div><div><strong>${escapeHTML(user.name)}</strong><span>@${escapeHTML(user.username || "usuario")} - ${escapeHTML(user.email)}</span></div><span class="badge ${user.role}">${labelize(user.role)}</span></article>
+    <article class="list-item account-profile-item"><div class="user-avatar large" data-session-avatar>${avatarMarkup(user)}</div><div><strong>${escapeHTML(user.name)}</strong><span>${escapeHTML(user.email)}</span></div><span class="badge ${user.role}">${labelize(user.role)}</span></article>
     <article class="list-item"><div><strong>Permisos</strong><span>${canWrite() ? "Puede crear y editar" : "Solo visualización"}</span></div><span class="badge ${canDelete() ? "admin" : "neutral"}">${canDelete() ? "admin" : "limitado"}</span></article>
   `;
   if (dom.profilePhotoUrl) dom.profilePhotoUrl.value = user.avatar || "";
@@ -717,19 +718,19 @@ function renderAccounts(user) {
 
   dom.authUsersTable.innerHTML = accounts.list.length ? accounts.list.map((item) => {
     const isSelf = item.id === user.accountId;
-    const fromServer = item.source === "env";
-    const locked = isSelf || fromServer;
-    const lockedNote = fromServer ? "Definido en el servidor" : isSelf ? "Sesión actual" : "";
+    const protectedAdmin = Boolean(item.isTaskManager);
+    const locked = isSelf || protectedAdmin;
+    const lockedNote = [isSelf ? "Sesión actual" : "", protectedAdmin ? "Asigna tareas" : ""].filter(Boolean).join(" · ");
     const id = escapeAttribute(item.id);
     return `
       <tr>
         <td>
           <div class="user-cell">
             <div class="user-avatar">${avatarMarkup(item)}</div>
-            <div class="entity-title"><strong>${escapeHTML(item.name)}</strong><span>@${escapeHTML(item.username || "-")}${lockedNote ? ` - ${escapeHTML(lockedNote)}` : ""}</span></div>
+            <div class="entity-title"><strong>${escapeHTML(item.name)}</strong><span>${escapeHTML(item.email)}${lockedNote ? ` · ${escapeHTML(lockedNote)}` : ""}</span></div>
           </div>
         </td>
-        <td><div class="entity-title"><strong>${escapeHTML(item.email || "-")}</strong><span>${escapeHTML(item.area || "Sin area")} ${item.phone ? `- ${escapeHTML(item.phone)}` : ""}</span></div></td>
+        <td><div class="entity-title"><strong>${escapeHTML(item.area || "Sin área")}${item.phone ? ` · ${escapeHTML(item.phone)}` : ""}</strong><span>${item.lastSignInAt ? `Último ingreso ${formatDate(item.lastSignInAt)}` : "Nunca ingresó"}</span></div></td>
         <td>
           ${locked ? "" : `<select class="table-select" onchange="updateAuthUserRole('${id}', this.value)">
             <option value="admin" ${item.role === "admin" ? "selected" : ""}>Admin</option>
@@ -738,7 +739,7 @@ function renderAccounts(user) {
           </select>`}
           <span class="badge ${escapeAttribute(item.role)}">${labelize(item.role)}</span>
         </td>
-        <td><div class="permission-tags">${(item.permissions || []).map((permission) => `<span>${escapeHTML(labelize(permission))}</span>`).join("") || `<span>${fromServer ? "todos" : "-"}</span>`}</div></td>
+        <td><div class="permission-tags">${(item.permissions || []).map((permission) => `<span>${escapeHTML(MODULE_LABELS[permission] || labelize(permission))}</span>`).join("") || `<span>${item.role === "admin" ? "Todos" : "-"}</span>`}</div></td>
         <td>
           ${locked ? "" : `<select class="table-select" onchange="updateAuthUserStatus('${id}', this.value)">
             <option value="activo" ${item.status === "activo" ? "selected" : ""}>Activo</option>
@@ -746,9 +747,9 @@ function renderAccounts(user) {
           </select>`}
           <span class="badge ${escapeAttribute(item.status)}">${item.status === "inactivo" ? "Inactivo" : "Activo"}</span>
         </td>
-        <td>${locked ? "" : `<div class="actions-cell">
+        <td>${isSelf ? "" : `<div class="actions-cell">
           <button class="ghost-button compact" type="button" onclick="resetAuthUserPassword('${id}')">Nueva contraseña</button>
-          <button class="danger-button compact" type="button" onclick="deleteAuthUser('${id}')">Eliminar</button>
+          ${protectedAdmin ? "" : `<button class="danger-button compact" type="button" onclick="deleteAuthUser('${id}')">Eliminar</button>`}
         </div>`}</td>
       </tr>
     `;

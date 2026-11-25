@@ -35,8 +35,8 @@ export function canDelete() {
   return user?.role === "admin" || user?.permissions?.includes("delete");
 }
 
-export async function login({ credential, password }) {
-  const session = await authService.login({ credential, password });
+export async function login({ email, password }) {
+  const session = await authService.login({ email, password });
   setAuthenticatedUser(session.user);
   await loadApiCollections();
   saveState();

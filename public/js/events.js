@@ -307,7 +307,7 @@ async function handleLogin(event) {
   try {
     setFormBusy(dom.loginForm, true);
     await login({
-      credential: dom.loginEmail.value.trim(),
+      email: dom.loginEmail.value.trim(),
       password: dom.loginPassword.value
     });
     dom.loginError.hidden = true;
@@ -806,7 +806,6 @@ async function handleAuthUserSubmit(event) {
     setFormBusy(dom.authUserForm, true);
     const user = await createAccount({
       name: dom.authUserName.value.trim(),
-      username: dom.authUserUsername.value.trim(),
       email: dom.authUserEmail.value.trim(),
       password,
       role: dom.authUserRole.value,
@@ -819,7 +818,7 @@ async function handleAuthUserSubmit(event) {
     });
     dom.authUserForm.reset();
     renderAll();
-    notify("Usuario creado", `@${user.username} ya puede ingresar con la contraseña temporal.`);
+    notify("Usuario creado", `${user.email} ya puede ingresar con la contraseña temporal.`);
   } catch (error) {
     notify("No se pudo crear el usuario", error.message);
   } finally {
@@ -830,7 +829,7 @@ async function handleAuthUserSubmit(event) {
 async function changeAuthUser(id, payload, title) {
   try {
     const user = await updateAccount(id, payload);
-    notify(title, `@${user.username}: ${labelize(user.role)}, ${user.status === "inactivo" ? "inactivo" : "activo"}.`);
+    notify(title, `${user.email}: ${labelize(user.role)}, ${user.status === "inactivo" ? "inactivo" : "activo"}.`);
   } catch (error) {
     notify("No se pudo actualizar el usuario", error.message);
   }

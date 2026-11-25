@@ -1,5 +1,6 @@
 // Login accounts managed by admins (Configuracion > Usuarios y roles). Kept on the server, never in the snapshot.
 import { userService } from "./api/userService.js";
+import { loadAssignments } from "./assignments.js";
 
 export const accounts = {
   list: [],
@@ -38,18 +39,21 @@ export function resetAccounts() {
 export async function createAccount(input) {
   const user = await userService.create(input);
   accounts.list = [...accounts.list, user];
+  loadAssignments({ silent: true }); // the new person must show up in "Asignar a" right away
   return user;
 }
 
 export async function updateAccount(id, input) {
   const user = await userService.update(id, input);
   accounts.list = accounts.list.map((item) => (item.id === id ? user : item));
+  loadAssignments({ silent: true });
   return user;
 }
 
 export async function deleteAccount(id) {
   await userService.remove(id);
   accounts.list = accounts.list.filter((item) => item.id !== id);
+  loadAssignments({ silent: true });
 }
 
 export function changeOwnPassword(currentPassword, newPassword) {

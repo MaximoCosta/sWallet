@@ -82,7 +82,7 @@ function stopPolling() {
 }
 
 function me() {
-  return String(currentUser()?.username || "").toLowerCase();
+  return String(currentUser()?.accountId || "");
 }
 
 function canManage() {
@@ -182,23 +182,23 @@ function timeAgo(iso) {
   return formatDateTime(iso);
 }
 
-function personName(username) {
-  const key = String(username || "").toLowerCase();
+function personName(id) {
+  const key = String(id || "");
   const fromTask = assignments.tasks.find((task) => task.assignee === key && task.assigneeName)?.assigneeName
     || assignments.tasks.find((task) => task.createdBy === key && task.createdByName)?.createdByName;
-  const found = assignments.assignees.find((item) => item.username === key);
-  if (found) return found.name || found.username;
+  const found = assignments.assignees.find((item) => item.id === key);
+  if (found) return found.name || found.email;
   const user = currentUser();
-  if (user && String(user.username).toLowerCase() === key) return user.name || user.username;
-  return fromTask || username || "-";
+  if (user && user.accountId === key) return user.name || user.email;
+  return fromTask || "Usuario eliminado";
 }
 
 function initials(name) {
   return escapeHTML(String(name || "?").trim().charAt(0).toUpperCase() || "?");
 }
 
-function avatar(username) {
-  return `<span class="user-avatar" aria-hidden="true">${initials(personName(username))}</span>`;
+function avatar(id) {
+  return `<span class="user-avatar" aria-hidden="true">${initials(personName(id))}</span>`;
 }
 
 function sortTasks(list) {
@@ -294,24 +294,24 @@ function renderStats() {
 function renderTeam() {
   const people = assignments.assignees.length
     ? assignments.assignees
-    : [...new Set(assignments.tasks.map((task) => task.assignee))].map((username) => ({ username, name: username }));
+    : [...new Set(assignments.tasks.map((task) => task.assignee))].map((id) => ({ id, name: personName(id) }));
   // Include people who still have tasks but are no longer active accounts.
   assignments.tasks.forEach((task) => {
-    if (!people.some((person) => person.username === task.assignee)) people.push({ username: task.assignee, name: task.assignee, inactive: true });
+    if (!people.some((person) => person.id === task.assignee)) people.push({ id: task.assignee, name: personName(task.assignee), inactive: true });
   });
 
   dom.assignmentTeam.innerHTML = people.length ? people.map((person) => {
-    const mine = assignments.tasks.filter((task) => task.assignee === person.username);
+    const mine = assignments.tasks.filter((task) => task.assignee === person.id);
     const open = mine.filter((task) => task.status !== "completada").length;
     const overdue = mine.filter(isOverdue).length;
     const done = mine.filter((task) => task.status === "completada").length;
     const progress = mine.length ? Math.round((done / mine.length) * 100) : 0;
-    const selected = assignments.filters.person === person.username;
+    const selected = assignments.filters.person === person.id;
     return `
-      <button class="team-card" type="button" data-team-person="${escapeAttribute(person.username)}" aria-pressed="${selected}">
+      <button class="team-card" type="button" data-team-person="${escapeAttribute(person.id)}" aria-pressed="${selected}">
         <div class="team-card-head">
-          ${avatar(person.username)}
-          <div><strong>${escapeHTML(person.name || person.username)}</strong><span>${person.inactive ? "Cuenta inactiva" : `@${escapeHTML(person.username)}`}</span></div>
+          ${avatar(person.id)}
+          <div><strong>${escapeHTML(person.name || person.email || "-")}</strong><span>${person.inactive ? "Cuenta inactiva o eliminada" : escapeHTML(person.email || "")}</span></div>
         </div>
         <div class="team-card-counts">
           <div><b>${mine.filter((task) => task.status === "asignada").length}</b><span>Asignadas</span></div>
@@ -436,7 +436,7 @@ function renderDashboardWidget() {
 function syncPersonOptions() {
   const select = dom.assignmentFilterPerson;
   if (!select) return;
-  const options = [`<option value="">Todo el equipo</option>`, ...assignments.assignees.map((person) => `<option value="${escapeAttribute(person.username)}">${escapeHTML(person.name || person.username)}</option>`)].join("");
+  const options = [`<option value="">Todo el equipo</option>`, ...assignments.assignees.map((person) => `<option value="${escapeAttribute(person.id)}">${escapeHTML(person.name || person.email)}</option>`)].join("");
   if (select.dataset.options !== options) {
     select.innerHTML = options;
     select.dataset.options = options;
@@ -570,7 +570,7 @@ function openForm(task = null) {
   dom.assignmentId.value = task?.id || "";
   dom.assignmentFormTitle.textContent = task ? "Editar tarea" : "Nueva tarea";
   dom.assignmentSubmit.textContent = task ? "Guardar cambios" : "Asignar tarea";
-  dom.assignmentAssignee.innerHTML = `<option value="">Elegí una persona</option>${assignments.assignees.map((person) => `<option value="${escapeAttribute(person.username)}">${escapeHTML(person.name || person.username)}${person.username === me() ? " (vos)" : ""}</option>`).join("")}`;
+  dom.assignmentAssignee.innerHTML = `<option value="">Elegí una persona</option>${assignments.assignees.map((person) => `<option value="${escapeAttribute(person.id)}">${escapeHTML(person.name || person.email)}${person.id === me() ? " (vos)" : ""}</option>`).join("")}`;
   dom.assignmentTitle.value = task?.title || "";
   dom.assignmentDescription.value = task?.description || "";
   dom.assignmentAssignee.value = task?.assignee || assignments.filters.person || "";

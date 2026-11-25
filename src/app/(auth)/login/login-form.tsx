@@ -13,10 +13,10 @@ export function LoginForm() {
   return (
     <form action={action} className="grid gap-4">
       <Label>
-        Usuario
+        Email
         <div className="relative">
           <UserRound className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input className="pl-10" name="credential" type="text" autoComplete="username" placeholder="FranPernil o MaxiTaxi" required />
+          <Input className="pl-10" name="credential" type="email" autoComplete="email" placeholder="tu@email.com" required />
         </div>
       </Label>
       <Label>
