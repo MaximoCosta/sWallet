@@ -3,13 +3,13 @@
 // Accounts live in Supabase (Authentication > Users). App data per account:
 //   app_metadata  (only the service key can write it): role, status, modules
 //   user_metadata: name, phone, area, notes, avatar
-// Emails in TASK_MANAGER_USERS (maximonewp@gmail.com by default) are always admin and the only ones who assign tasks.
+// Emails in TASK_MANAGER_USERS (maximonewps@gmail.com by default) are always admin and the only ones who assign tasks.
 
 export const APP_ROLES = ["admin", "finanzas", "solo_lectura"] as const;
 export const APP_STATUSES = ["activo", "inactivo"] as const;
 export const APP_MODULES = ["clients", "finance", "projects", "reports", "settings"] as const;
 export const MIN_PASSWORD_LENGTH = 8;
-const DEFAULT_TASK_MANAGERS = ["maximonewp@gmail.com"];
+const DEFAULT_TASK_MANAGERS = ["maximonewps@gmail.com"];
 const BAN_FOREVER = "876000h";
 
 export type AppRole = (typeof APP_ROLES)[number];
