@@ -86,7 +86,8 @@ async function route(request: NextRequest, context: RouteContext) {
     }
 
     if (method === "POST" && path === "auth/login") {
-      return login(request);
+      // await: without it a rejected login escapes this try/catch and Next answers a bare 500.
+      return await login(request);
     }
 
     if (method === "GET" && path === "auth/me") {
@@ -203,7 +204,8 @@ async function route(request: NextRequest, context: RouteContext) {
       return json({ message: "El servidor no tiene configurado el acceso. Contacta al administrador." }, 503);
     }
     console.error(error);
-    return json({ message: "Error interno del servidor." }, 500);
+    const code = errorCode(error);
+    return json({ message: `Error interno del servidor${code ? ` (codigo ${code})` : ""}.`, code }, 500);
   }
 }
 
@@ -455,6 +457,16 @@ function unauthorizedError() {
 }
 
 class AuthError extends Error {}
+
+// Prisma / Postgres error codes only (no messages or SQL), so a failure can be identified without exposing internals.
+function errorCode(error: unknown) {
+  if (!error || typeof error !== "object") return undefined;
+  const { code, meta } = error as { code?: unknown; meta?: { code?: unknown } };
+  const parts = [code, meta?.code].filter((part): part is string => typeof part === "string" && /^[A-Z0-9]{1,10}$/i.test(part));
+  if (parts.length) return parts.join("/");
+  const name = (error as { name?: unknown }).name;
+  return typeof name === "string" && name.startsWith("Prisma") ? name : undefined;
+}
 
 function json(payload: unknown, status = 200) {
   return NextResponse.json(payload, { status });

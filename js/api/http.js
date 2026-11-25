@@ -127,5 +127,5 @@ function errorMessage(payload, status) {
   if (payload?.message) return payload.message;
   if (payload?.error?.message) return payload.error.message;
   if (status === 401) return "Sesion expirada. Inicia sesion nuevamente.";
-  return "No se pudo completar la operacion.";
+  return `No se pudo completar la operación (error ${status || "de red"}). Si se repite, avisale al administrador.`;
 }
