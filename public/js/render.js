@@ -1,4 +1,5 @@
-import { canDelete, canWrite, currentUser, isAuthenticated } from "./auth.js";
+import { canDelete, canWrite, currentUser, isAdmin, isAuthenticated } from "./auth.js";
+import { accounts, loadAccounts } from "./accounts.js";
 import {
   actions,
   billingSummaryByClient,
@@ -624,36 +625,7 @@ function renderSettings() {
     <article class="list-item"><div><strong>Permisos</strong><span>${canWrite() ? "Puede crear y editar" : "Solo visualizacion"}</span></div><span class="badge ${canDelete() ? "admin" : "neutral"}">${canDelete() ? "admin" : "limitado"}</span></article>
   `;
   if (dom.profilePhotoUrl) dom.profilePhotoUrl.value = user.avatar || "";
-  if (dom.authUsersTable) {
-    dom.authUsersTable.innerHTML = state.users.length ? state.users.map((item) => `
-      <tr>
-        <td>
-          <div class="user-cell">
-            <div class="user-avatar">${avatarMarkup(item)}</div>
-            <div class="entity-title"><strong>${escapeHTML(item.name)}</strong><span>@${escapeHTML(item.username || "-")}${item.id === user.id ? " - sesion actual" : ""}</span></div>
-          </div>
-        </td>
-        <td><div class="entity-title"><strong>${escapeHTML(item.email)}</strong><span>${escapeHTML(item.area || "Sin area")} ${item.phone ? `- ${escapeHTML(item.phone)}` : ""}</span></div></td>
-        <td>
-          <select class="table-select write-action" onchange="updateAuthUserRole('${item.id}', this.value)" ${item.id === user.id ? "disabled" : ""}>
-            <option value="admin" ${item.role === "admin" ? "selected" : ""}>Admin</option>
-            <option value="finanzas" ${item.role === "finanzas" ? "selected" : ""}>Finanzas</option>
-            <option value="solo_lectura" ${item.role === "solo_lectura" ? "selected" : ""}>Solo lectura</option>
-          </select>
-          <span class="badge ${item.role}">${labelize(item.role)}</span>
-        </td>
-        <td><div class="permission-tags">${(item.permissions || []).map((permission) => `<span>${escapeHTML(labelize(permission))}</span>`).join("") || "<span>reportes</span>"}</div></td>
-        <td>
-          <select class="table-select write-action" onchange="updateAuthUserStatus('${item.id}', this.value)" ${item.id === user.id ? "disabled" : ""}>
-            <option value="activo" ${(item.status || "activo") === "activo" ? "selected" : ""}>Activo</option>
-            <option value="inactivo" ${item.status === "inactivo" ? "selected" : ""}>Inactivo</option>
-          </select>
-          <span class="badge ${item.status || "activo"}">${labelize(item.status || "activo")}</span>
-        </td>
-        <td><button class="danger-button compact delete-action" type="button" onclick="deleteAuthUser('${item.id}')" ${item.id === user.id ? "disabled" : ""}>Eliminar</button></td>
-      </tr>
-    `).join("") : tableEmpty(6, "No hay usuarios creados.");
-  }
+  renderAccounts(user);
   const diagnostics = dataIntegrityIssues();
   dom.settingsData.innerHTML = `
     <article class="list-item"><div><strong>Datos locales</strong><span>${clients().length} clientes, ${projects().length} proyectos, ${tasks().length} tareas, ${budgets().length} presupuestos, ${calendarEvents().length} eventos</span></div><span class="badge saludable">localStorage</span></article>
@@ -678,6 +650,68 @@ function renderSettings() {
       </article>
     `).join("") : emptyState("Todavia no hay actividad registrada.");
   }
+}
+
+function renderAccounts(user) {
+  const admin = isAdmin();
+  if (dom.authUserForm) dom.authUserForm.hidden = !admin;
+  if (dom.ownPasswordForm) dom.ownPasswordForm.hidden = user.passwordManagedBy !== "user";
+  if (!dom.authUsersTable) return;
+
+  if (!admin) {
+    dom.authUsersTable.innerHTML = tableEmpty(6, "Solo un admin puede ver y administrar los usuarios.");
+    return;
+  }
+  if (!accounts.loaded) {
+    dom.authUsersTable.innerHTML = tableEmpty(6, "Cargando usuarios...");
+    loadAccounts().then(() => {
+      if (isAuthenticated()) renderSettings();
+    });
+    return;
+  }
+  if (accounts.error) {
+    dom.authUsersTable.innerHTML = tableEmpty(6, accounts.error);
+    return;
+  }
+
+  dom.authUsersTable.innerHTML = accounts.list.length ? accounts.list.map((item) => {
+    const isSelf = item.id === user.accountId;
+    const fromServer = item.source === "env";
+    const locked = isSelf || fromServer;
+    const lockedNote = fromServer ? "Definido en el servidor" : isSelf ? "Sesion actual" : "";
+    const id = escapeAttribute(item.id);
+    return `
+      <tr>
+        <td>
+          <div class="user-cell">
+            <div class="user-avatar">${avatarMarkup(item)}</div>
+            <div class="entity-title"><strong>${escapeHTML(item.name)}</strong><span>@${escapeHTML(item.username || "-")}${lockedNote ? ` - ${escapeHTML(lockedNote)}` : ""}</span></div>
+          </div>
+        </td>
+        <td><div class="entity-title"><strong>${escapeHTML(item.email || "-")}</strong><span>${escapeHTML(item.area || "Sin area")} ${item.phone ? `- ${escapeHTML(item.phone)}` : ""}</span></div></td>
+        <td>
+          ${locked ? "" : `<select class="table-select" onchange="updateAuthUserRole('${id}', this.value)">
+            <option value="admin" ${item.role === "admin" ? "selected" : ""}>Admin</option>
+            <option value="finanzas" ${item.role === "finanzas" ? "selected" : ""}>Finanzas</option>
+            <option value="solo_lectura" ${item.role === "solo_lectura" ? "selected" : ""}>Solo lectura</option>
+          </select>`}
+          <span class="badge ${escapeAttribute(item.role)}">${labelize(item.role)}</span>
+        </td>
+        <td><div class="permission-tags">${(item.permissions || []).map((permission) => `<span>${escapeHTML(labelize(permission))}</span>`).join("") || `<span>${fromServer ? "todos" : "-"}</span>`}</div></td>
+        <td>
+          ${locked ? "" : `<select class="table-select" onchange="updateAuthUserStatus('${id}', this.value)">
+            <option value="activo" ${item.status === "activo" ? "selected" : ""}>Activo</option>
+            <option value="inactivo" ${item.status === "inactivo" ? "selected" : ""}>Inactivo</option>
+          </select>`}
+          <span class="badge ${escapeAttribute(item.status)}">${item.status === "inactivo" ? "Inactivo" : "Activo"}</span>
+        </td>
+        <td>${locked ? "" : `<div class="actions-cell">
+          <button class="ghost-button compact" type="button" onclick="resetAuthUserPassword('${id}')">Nueva contrasena</button>
+          <button class="danger-button compact" type="button" onclick="deleteAuthUser('${id}')">Eliminar</button>
+        </div>`}</td>
+      </tr>
+    `;
+  }).join("") : tableEmpty(6, "No hay usuarios creados.");
 }
 
 function avatarMarkup(user) {

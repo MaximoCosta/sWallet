@@ -1,4 +1,5 @@
-import { canDelete, canWrite, login, logout } from "./auth.js";
+import { canDelete, canWrite, isAdmin, login, logout } from "./auth.js";
+import { changeOwnPassword, createAccount, deleteAccount, updateAccount } from "./accounts.js";
 import { filteredInvoices, projectExists, clientExists } from "./finance.js";
 import { createRecord, parseDate, state, toInputDate } from "./state.js";
 import { clearConflictBackup, dismissAllSyncConflicts, readConflictBackup, resolveSyncConflict, saveState, resetStorage } from "./storage.js";
@@ -97,6 +98,8 @@ export function bindEvents() {
   dom.marketingForm.addEventListener("submit", handleMarketingSubmit);
   if (dom.profilePhotoForm) dom.profilePhotoForm.addEventListener("submit", handleProfilePhotoSubmit);
   if (dom.clearProfilePhoto) dom.clearProfilePhoto.addEventListener("click", clearProfilePhoto);
+  if (dom.authUserForm) dom.authUserForm.addEventListener("submit", handleAuthUserSubmit);
+  if (dom.ownPasswordForm) dom.ownPasswordForm.addEventListener("submit", handleOwnPasswordSubmit);
 
   dom.cancelClientEdit.addEventListener("click", () => { resetClientForm(); closeModal(); });
   dom.cancelPaymentEdit.addEventListener("click", () => { resetPaymentForm(); closeModal(); });
@@ -765,6 +768,100 @@ async function handleProfilePhotoSubmit(event) {
   }
 }
 
+async function handleAuthUserSubmit(event) {
+  event.preventDefault();
+  if (!isAdmin()) {
+    notify("Permiso requerido", "Solo un admin puede crear usuarios.");
+    return;
+  }
+  if (!validateForm(dom.authUserForm)) return;
+  const password = dom.authUserPassword.value;
+  if (password.length < 8) {
+    dom.authUserPassword.classList.add("field-error");
+    notify("Contrasena muy corta", "La contrasena temporal debe tener al menos 8 caracteres.");
+    return;
+  }
+  try {
+    setFormBusy(dom.authUserForm, true);
+    const user = await createAccount({
+      name: dom.authUserName.value.trim(),
+      username: dom.authUserUsername.value.trim(),
+      email: dom.authUserEmail.value.trim(),
+      password,
+      role: dom.authUserRole.value,
+      status: dom.authUserStatus.value,
+      avatar: dom.authUserAvatar.value.trim(),
+      phone: dom.authUserPhone.value.trim(),
+      area: dom.authUserArea.value.trim(),
+      permissions: [...dom.authUserPermissions.selectedOptions].map((option) => option.value),
+      notes: dom.authUserNotes.value.trim()
+    });
+    dom.authUserForm.reset();
+    renderAll();
+    notify("Usuario creado", `@${user.username} ya puede ingresar con la contrasena temporal.`);
+  } catch (error) {
+    notify("No se pudo crear el usuario", error.message);
+  } finally {
+    setFormBusy(dom.authUserForm, false);
+  }
+}
+
+async function changeAuthUser(id, payload, title) {
+  try {
+    const user = await updateAccount(id, payload);
+    notify(title, `@${user.username}: ${labelize(user.role)}, ${user.status === "inactivo" ? "inactivo" : "activo"}.`);
+  } catch (error) {
+    notify("No se pudo actualizar el usuario", error.message);
+  }
+  renderAll();
+}
+
+async function resetAuthUserPassword(id) {
+  const password = prompt("Nueva contrasena temporal (minimo 8 caracteres):");
+  if (password === null) return;
+  if (password.length < 8) {
+    notify("Contrasena muy corta", "Debe tener al menos 8 caracteres.");
+    return;
+  }
+  await changeAuthUser(id, { password }, "Contrasena cambiada");
+}
+
+async function deleteAuthUser(id) {
+  if (!confirm("Eliminar este usuario? Ya no podra ingresar.")) return;
+  try {
+    await deleteAccount(id);
+    notify("Usuario eliminado", "Se quito el acceso.");
+  } catch (error) {
+    notify("No se pudo eliminar el usuario", error.message);
+  }
+  renderAll();
+}
+
+async function handleOwnPasswordSubmit(event) {
+  event.preventDefault();
+  if (!validateForm(dom.ownPasswordForm)) return;
+  const next = dom.ownPasswordNew.value;
+  if (next.length < 8) {
+    notify("Contrasena muy corta", "La nueva contrasena debe tener al menos 8 caracteres.");
+    return;
+  }
+  if (next !== dom.ownPasswordConfirm.value) {
+    dom.ownPasswordConfirm.classList.add("field-error");
+    notify("No coinciden", "Repite la nueva contrasena exactamente igual.");
+    return;
+  }
+  try {
+    setFormBusy(dom.ownPasswordForm, true);
+    await changeOwnPassword(dom.ownPasswordCurrent.value, next);
+    dom.ownPasswordForm.reset();
+    notify("Contrasena cambiada", "Usala la proxima vez que ingreses.");
+  } catch (error) {
+    notify("No se pudo cambiar la contrasena", error.message);
+  } finally {
+    setFormBusy(dom.ownPasswordForm, false);
+  }
+}
+
 function clearProfilePhoto() {
   if (!assertWritable()) return;
   dom.profilePhotoUrl.value = "";
@@ -797,7 +894,6 @@ function updateCurrentUserProfile(payload) {
   if (username) {
     state.userProfiles[username] = { ...(state.userProfiles[username] || {}), ...payload };
   }
-  state.userProfiles[user.id] = { ...(state.userProfiles[user.id] || {}), ...payload };
   updateRecord(state.users, state.session.userId, payload);
 }
 
@@ -928,6 +1024,10 @@ function exposeInlineActions() {
   window.editMarketingCampaign = (id) => editGeneric("marketingCampaigns", id, fillMarketingForm);
   window.deleteMarketingCampaign = (id) => deleteGeneric("marketingCampaigns", id, "Campana eliminada");
   window.printFinancialReport = printFinancialReport;
+  window.updateAuthUserRole = (id, role) => changeAuthUser(id, { role }, "Rol actualizado");
+  window.updateAuthUserStatus = (id, status) => changeAuthUser(id, { status }, status === "inactivo" ? "Usuario desactivado" : "Usuario activado");
+  window.resetAuthUserPassword = resetAuthUserPassword;
+  window.deleteAuthUser = deleteAuthUser;
   window.goSearchResult = (view) => {
     state.globalSearch = "";
     renderView(view);

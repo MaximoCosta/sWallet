@@ -1211,9 +1211,17 @@
                                 <button class="primary-button" type="submit">Guardar foto</button>
                             </div>
                         </form>
+                        <form id="ownPasswordForm" class="data-form" novalidate hidden>
+                            <div class="form-row">
+                                <label>Contrasena actual<input id="ownPasswordCurrent" required type="password" autocomplete="current-password"></label>
+                                <label>Nueva contrasena<input id="ownPasswordNew" required minlength="8" type="password" autocomplete="new-password"></label>
+                                <label>Repetir nueva<input id="ownPasswordConfirm" required minlength="8" type="password" autocomplete="new-password"></label>
+                            </div>
+                            <button class="primary-button" type="submit">Cambiar contrasena</button>
+                        </form>
                     </section>
 
-                    <section class="panel">
+                    <section class="panel settings-users-panel">
                         <div class="panel-header"><div><p class="eyebrow">Accesos</p><h2>Usuarios y roles</h2></div></div>
                         <form id="authUserForm" class="data-form" novalidate>
                             <div class="form-row">
@@ -1222,7 +1230,7 @@
                                 <label>Email<input id="authUserEmail" required type="email"></label>
                             </div>
                             <div class="form-row">
-                                <label>Contrasena temporal<input id="authUserPassword" required minlength="6" type="password"></label>
+                                <label>Contrasena temporal<input id="authUserPassword" required minlength="8" type="password" autocomplete="new-password"></label>
                                 <label>Rol<select id="authUserRole" required><option value="admin">Admin</option><option value="finanzas">Finanzas</option><option value="solo_lectura">Solo lectura</option></select></label>
                                 <label>Estado<select id="authUserStatus" required><option value="activo">Activo</option><option value="inactivo">Inactivo</option></select></label>
                             </div>
@@ -1241,7 +1249,7 @@
                                 </select>
                             </label>
                             <label>Notas internas<textarea id="authUserNotes" rows="2" placeholder="Responsabilidades, alcance, observaciones..."></textarea></label>
-                            <button class="primary-button write-action" type="submit">Crear usuario</button>
+                            <button class="primary-button" type="submit">Crear usuario</button>
                         </form>
                         <div class="table-wrap settings-users-table">
                             <table>

@@ -1583,7 +1583,7 @@ tr:last-child td {
 
 .read-only .write-action,
 .read-only .delete-action,
-.read-only form:not(#loginForm):not(#registerForm) button[type="submit"] {
+.read-only form:not(#loginForm):not(#registerForm):not(#ownPasswordForm) button[type="submit"] {
     display: none !important;
 }
 
@@ -2414,6 +2414,11 @@ td,
 
 .settings-users-table {
     margin-top: 18px;
+}
+
+/* Users and roles need the full row: six columns do not fit in half of the settings grid. */
+.settings-users-panel {
+    grid-column: 1 / -1;
 }
 
 .audit-list {

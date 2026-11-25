@@ -3,6 +3,21 @@ import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { isValidLoginPassword, LoginConfigError, loginEmailFor, matchAllowedUsername } from "@/lib/login-credentials";
+import {
+  accessFor,
+  AppUserError,
+  type AppUserRole,
+  canWriteRole,
+  changeOwnPassword,
+  createAppUser,
+  deleteAppUser,
+  findActiveUserByCredential,
+  listAppUsers,
+  type PublicAppUser,
+  toPublicUser,
+  updateAppUser,
+  verifyDatabaseLogin
+} from "@/lib/app-users";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,6 +31,13 @@ const DEV_CORS_ORIGINS = ["http://localhost:5500", "http://127.0.0.1:5500"];
 
 type RouteContext = {
   params: Promise<{ path?: string[] }>;
+};
+
+type Session = {
+  userId: string;
+  username: string;
+  role: AppUserRole;
+  profile: PublicAppUser | null;
 };
 
 type TokenPayload = {
@@ -78,6 +100,35 @@ async function route(request: NextRequest, context: RouteContext) {
       return json(sessionPayload(session));
     }
 
+    if (method === "POST" && path === "auth/password") {
+      const session = await requireSession(request, "access");
+      const body = await readJson(request);
+      await changeOwnPassword(session.username, String(body.currentPassword || ""), String(body.newPassword || ""));
+      return json({ ok: true });
+    }
+
+    if (path === "users" || path.startsWith("users/")) {
+      const session = await requireSession(request, "access");
+      if (session.role !== "admin") return json({ message: "Solo un admin puede administrar usuarios." }, 403);
+      const id = path.slice("users/".length);
+
+      if (method === "GET" && path === "users") return json({ users: await listAppUsers() });
+      if (method === "POST" && path === "users") {
+        return json({ user: await createAppUser(await readJson(request)) }, 201);
+      }
+      if (method === "PATCH" && id) {
+        if (id === session.profile?.id) {
+          return json({ message: "No puedes cambiar tu propio rol o estado." }, 400);
+        }
+        return json({ user: await updateAppUser(id, await readJson(request)) });
+      }
+      if (method === "DELETE" && id) {
+        if (id === session.profile?.id) return json({ message: "No puedes eliminar tu propio usuario." }, 400);
+        await deleteAppUser(id);
+        return json({ ok: true });
+      }
+    }
+
     if (method === "POST" && path === "auth/logout") {
       return json({ ok: true });
     }
@@ -93,6 +144,9 @@ async function route(request: NextRequest, context: RouteContext) {
 
     if ((method === "POST" || method === "PUT") && path === "state") {
       const session = await requireSession(request, "access");
+      if (!canWriteRole(session.role)) {
+        return json({ message: "Tu usuario es de solo lectura: no puede guardar cambios." }, 403);
+      }
       const body = await readJson(request);
       const snapshot = sanitizeSnapshot(body.snapshot ?? body);
       const baseUpdatedAt = parseBaseUpdatedAt(body.baseUpdatedAt);
@@ -114,6 +168,9 @@ async function route(request: NextRequest, context: RouteContext) {
 
     return json({ message: "Ruta no encontrada." }, 404);
   } catch (error) {
+    if (error instanceof AppUserError) {
+      return json({ message: error.message }, error.status);
+    }
     if (error instanceof AuthError) {
       return unauthorized(error.message);
     }
@@ -136,16 +193,40 @@ async function login(request: NextRequest) {
   const credential = String(body.credential || body.email || body.username || "").trim();
   const password = String(body.password || "");
   tokenSecret(); // fail closed before issuing tokens if the signing secret is missing
-  const passwordOk = isValidLoginPassword(password);
-  const username = matchAllowedUsername(credential);
 
-  if (!username || !passwordOk) {
+  const session = await authenticate(credential, password);
+  if (!session) {
     registerLoginFailure(clientKey);
     return unauthorized("Usuario o contrasena incorrectos.");
   }
 
   loginFailures.delete(clientKey);
-  return json(sessionPayload({ userId: userIdFor(username), username }));
+  return json(sessionPayload(session));
+}
+
+// Users in ALLOWED_LOGIN_USERS use the shared password; everyone else is looked up in AppLoginUser.
+async function authenticate(credential: string, password: string): Promise<Session | null> {
+  const envUsername = matchAllowedUsername(credential);
+  if (envUsername) {
+    return isValidLoginPassword(password) ? envSession(envUsername) : null;
+  }
+  const user = await verifyDatabaseLogin(credential, password);
+  return user ? databaseSession(toPublicUser(user)) : null;
+}
+
+async function resolveSession(username: string): Promise<Session | null> {
+  const envUsername = matchAllowedUsername(username);
+  if (envUsername) return envSession(envUsername);
+  const user = await findActiveUserByCredential(username);
+  return user ? databaseSession(toPublicUser(user)) : null;
+}
+
+function envSession(username: string): Session {
+  return { userId: userIdFor(username), username, role: "admin", profile: null };
+}
+
+function databaseSession(profile: PublicAppUser): Session {
+  return { userId: userIdFor(profile.username), username: profile.username, role: profile.role, profile };
 }
 
 // Optimistic concurrency: a write only lands if the client saw the latest version.
@@ -212,24 +293,32 @@ function registerLoginFailure(key: string) {
   }
 }
 
-function sessionPayload(session: { userId: string; username: string }) {
+function sessionPayload(session: Session) {
+  const claims = { userId: session.userId, username: session.username };
   return {
     user: userPayload(session),
-    accessToken: createToken({ ...session, type: "access" }, ACCESS_TTL_SECONDS),
-    refreshToken: createToken({ ...session, type: "refresh" }, REFRESH_TTL_SECONDS),
+    accessToken: createToken({ ...claims, type: "access" }, ACCESS_TTL_SECONDS),
+    refreshToken: createToken({ ...claims, type: "refresh" }, REFRESH_TTL_SECONDS),
     expiresAt: new Date(Date.now() + ACCESS_TTL_SECONDS * 1000).toISOString()
   };
 }
 
-function userPayload(session: { userId: string; username: string }) {
+function userPayload(session: Session) {
+  const profile = session.profile;
   return {
     id: session.userId,
-    name: session.username,
+    accountId: profile?.id ?? `env:${session.username.toLowerCase()}`,
+    name: profile?.name || session.username,
     username: session.username,
-    email: loginEmailFor(session.username),
-    role: "admin",
+    email: profile?.email || loginEmailFor(session.username),
+    role: session.role,
     status: "activo",
-    permissions: ["read", "write", "delete", "admin"]
+    permissions: accessFor(session.role),
+    modules: profile?.permissions ?? [],
+    ...(profile?.phone ? { phone: profile.phone } : {}),
+    ...(profile?.area ? { area: profile.area } : {}),
+    ...(profile?.avatar ? { avatar: profile.avatar } : {}),
+    passwordManagedBy: profile ? "user" : "server"
   };
 }
 
@@ -254,9 +343,9 @@ async function verifyToken(token: string, type: "access" | "refresh") {
     return null;
   }
   if (payload.type !== type || payload.exp < Math.floor(Date.now() / 1000)) return null;
-  if (!matchAllowedUsername(payload.username)) return null;
 
-  return { userId: payload.userId, username: payload.username };
+  // Re-read the account on every request: a deactivated or deleted user loses access right away.
+  return resolveSession(String(payload.username || ""));
 }
 
 function createToken(payload: Omit<TokenPayload, "exp">, ttlSeconds: number) {

@@ -192,7 +192,7 @@ export function hasUnsyncedChanges() {
 }
 
 function queueRemoteSave(payload) {
-  if (!getAccessToken()) return;
+  if (!getAccessToken() || !currentUserCanWrite()) return;
   pendingPayload = payload;
   clearRetry();
   if (flushing) return;
@@ -221,6 +221,12 @@ async function flushRemoteSaves() {
         }
         pendingPayload = mergeWithRemote(latestLocal, error.details);
         continue;
+      }
+      if (error?.status === 403) {
+        // The role changed to read-only: the server will never accept this write, so do not retry it.
+        pendingPayload = null;
+        emitSync("error", error.message || "Tu usuario no tiene permiso para guardar cambios.");
+        return;
       }
       console.error("No se pudo sincronizar con Supabase", error);
       const firstFailure = !syncFailing;
@@ -464,6 +470,13 @@ function normalizeProfiles(profiles) {
     if (value && typeof value === "object" && !Array.isArray(value)) acc[key] = { ...value };
     return acc;
   }, {});
+}
+
+// Mirrors canWrite() in auth.js (not imported to avoid a circular dependency).
+function currentUserCanWrite() {
+  const user = state.users.find((item) => item.id === state.session?.userId);
+  if (!user) return false;
+  return user.role === "admin" || user.role === "finanzas" || Boolean(user.permissions?.includes("write"));
 }
 
 function applyCurrentUserProfile() {

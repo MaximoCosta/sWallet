@@ -1,5 +1,6 @@
 import { authService } from "./api/authService.js";
 import { state } from "./state.js";
+import { resetAccounts } from "./accounts.js";
 import { loadRemoteState, saveState } from "./storage.js";
 
 export function mockHash(value) {
@@ -22,6 +23,10 @@ export function isAuthenticated() {
 export function canWrite() {
   const user = currentUser();
   return user?.role === "admin" || user?.role === "finanzas" || user?.permissions?.includes("write");
+}
+
+export function isAdmin() {
+  return currentUser()?.role === "admin";
 }
 
 export function canDelete() {
@@ -68,12 +73,14 @@ export async function loadApiCollections() {
 }
 
 function setAuthenticatedUser(user) {
+  if (state.session?.userId && currentUser()?.username !== user.username) resetAccounts();
   const normalized = normalizeUser(user);
   state.users = [normalized];
   state.session = { userId: normalized.id, createdAt: new Date().toISOString() };
 }
 
 function clearAuthState() {
+  resetAccounts();
   state.session = null;
   state.users = [];
   state.clients = [];
@@ -82,7 +89,8 @@ function clearAuthState() {
 
 function normalizeUser(user) {
   const username = user.username || String(user.email || "").split("@")[0];
-  const profile = state.userProfiles?.[username] || state.userProfiles?.[String(username).toLowerCase()] || state.userProfiles?.[user.id] || {};
+  // user.id is the shared snapshot key for every account, so profiles are looked up by username only.
+  const profile = state.userProfiles?.[username] || state.userProfiles?.[String(username).toLowerCase()] || {};
   return {
     permissions: [],
     avatar: "",
