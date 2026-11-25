@@ -1,5 +1,6 @@
 import { canDelete, canWrite, currentUser, isAdmin, isAuthenticated } from "./auth.js";
 import { accounts, loadAccounts } from "./accounts.js";
+import { renderAssignments } from "./assignments.js";
 import {
   actions,
   billingSummaryByClient,
@@ -43,17 +44,18 @@ import { readConflictBackup, readSyncConflicts } from "./storage.js";
 export const dom = {};
 
 const titles = {
-  dashboard: "Dashboard financiero",
+  dashboard: "Inicio",
+  asignaciones: "Tareas",
   clientes: "Clientes",
   crm: "CRM / Ventas",
   proyectos: "Proyectos",
-  finanzas: "Finanzas",
+  finanzas: "Resumen financiero",
   pagos: "Pagos",
-  facturacion: "Facturacion",
+  facturacion: "Facturación",
   presupuestos: "Presupuestos",
   calendario: "Calendario",
-  administracion: "Administracion",
-  tareas: "Tareas",
+  administracion: "Administración",
+  tareas: "Tareas de proyectos",
   metas: "Metas",
   documentos: "Documentos",
   soporte: "Soporte",
@@ -63,7 +65,31 @@ const titles = {
   movimientos: "Movimientos",
   reportes: "Reportes",
   suscripciones: "Suscripciones",
-  configuracion: "Configuracion"
+  configuracion: "Configuración"
+};
+
+const subtitles = {
+  asignaciones: "Tareas asignadas y su avance",
+  calendario: "Eventos, entregas y vencimientos",
+  clientes: "Cartera de clientes y su estado comercial",
+  crm: "Oportunidades, notas y próximas acciones",
+  presupuestos: "Presupuestos enviados y su seguimiento",
+  marketing: "Campanas y acciones de marketing",
+  portal: "Lo que ve cada cliente de su cuenta",
+  finanzas: "Caja, deuda y rentabilidad",
+  pagos: "Cobros registrados y pendientes",
+  facturacion: "Facturas por cliente y por estado",
+  movimientos: "Ingresos y gastos de caja",
+  suscripciones: "Servicios recurrentes y renovaciones",
+  reportes: "Gráficos, lecturas y exportaciones",
+  proyectos: "Avance, presupuesto y ganancia por proyecto",
+  tareas: "Checklist interno ligado a clientes y proyectos",
+  metas: "Objetivos del período y su progreso",
+  documentos: "Contratos, archivos y links",
+  soporte: "Planes de mantenimiento y pedidos",
+  equipo: "Personas y responsabilidades",
+  administracion: "Salud de cada cliente, notas y acciones",
+  configuracion: "Empresa, cuenta, usuarios y datos"
 };
 
 export function bindDom() {
@@ -86,13 +112,16 @@ export function renderAuth() {
   document.querySelectorAll("[data-user-brand]").forEach((item) => {
     item.textContent = displayBrandName(user);
   });
-  dom.sessionUser.textContent = user.email;
-  dom.sessionRole.textContent = user.role.replace("_", " ");
+  dom.sessionUser.textContent = user.name || user.username;
+  dom.sessionRole.textContent = ROLE_LABELS[user.role] || labelize(user.role);
   document.querySelectorAll("[data-session-avatar]").forEach((item) => {
     item.innerHTML = avatarMarkup(user);
   });
   document.body.classList.toggle("read-only", !canWrite());
 }
+
+const ALERT_TONE_LABELS = { vencida: "Vencida", pendiente: "Próxima", neutral: "Seguimiento", coral: "Urgente" };
+const ROLE_LABELS = { admin: "Admin", finanzas: "Finanzas", solo_lectura: "Solo lectura" };
 
 function displayBrandName(user) {
   const username = String(user?.username || user?.name || "").toLowerCase();
@@ -133,6 +162,7 @@ export function renderAll() {
   renderMarketing();
   renderClientPortal();
   renderSettings();
+  renderAssignments();
   renderReports();
   drawAllCharts();
   applyCompanyTheme();
@@ -151,17 +181,28 @@ export function renderView(view) {
   drawAllCharts();
 }
 
+function capitalize(text) {
+  return text ? text.charAt(0).toUpperCase() + text.slice(1) : "";
+}
+
 function syncActiveNavigation(view) {
   document.querySelectorAll(".nav-link").forEach((link) => link.classList.toggle("active", link.dataset.view === view));
   document.querySelectorAll(".mobile-bank-nav [data-view]").forEach((link) => link.classList.toggle("active", link.dataset.view === view));
 }
 
 function updatePageTitle(view) {
-  const title = titles[view] || "Dashboard financiero";
+  const title = titles[view] || "Inicio";
   const firstName = displayBrandName(currentUser()) || "usuario";
-  const dashboardTitle = `Bienvenido: ${firstName}`;
+  const dashboardTitle = `Hola, ${firstName}`;
   dom.pageTitle.textContent = view === "dashboard" ? dashboardTitle : title;
-  dom.pageTitle.dataset.mobileTitle = view === "dashboard" ? dashboardTitle : title;
+  document.title = `${view === "dashboard" ? "Inicio" : title} · sWallet`;
+  if (dom.pageSubtitle) {
+    dom.pageSubtitle.textContent = view === "dashboard"
+      ? capitalize(new Intl.DateTimeFormat("es-AR", { weekday: "long", day: "numeric", month: "long" }).format(new Date()))
+      : view === "asignaciones"
+        ? (currentUser()?.canAssignTasks ? "Asigná tareas al equipo y seguí su avance" : "Tus tareas asignadas y su avance")
+        : subtitles[view] || "";
+  }
 }
 
 export function syncControls() {
@@ -242,7 +283,7 @@ function renderDashboardLists() {
         </div>
       </article>
     `;
-  }).join("") : emptyState("No hay facturas proximas a vencer.");
+  }).join("") : emptyState("No hay facturas próximas a vencer.");
 
   const summaries = billingSummaryByClient().filter((summary) => summary.totalPendiente > 0);
   dom.debtClientsTable.innerHTML = summaries.length ? summaries.map((summary) => `
@@ -263,7 +304,7 @@ function renderDashboardLists() {
       </div>
       <strong class="${item.type === "salida" ? "amount-negative" : "amount-positive"}">${item.sign}${formatMoney(item.amount, item.currency)}</strong>
     </article>
-  `).join("") : emptyState("Todavia no hay movimientos.");
+  `).join("") : emptyState("Todavía no hay movimientos.");
 
   if (dom.companyProgressWidget) {
     const progress = companyProgress();
@@ -309,7 +350,7 @@ function renderNotifications() {
         <strong>${escapeHTML(item.type)} - ${escapeHTML(item.title)}</strong>
         <span>${escapeHTML(item.detail)} - ${formatDate(item.date)}</span>
       </div>
-      <span class="badge ${item.tone}">${escapeHTML(item.tone)}</span>
+      <span class="badge ${item.tone}">${ALERT_TONE_LABELS[item.tone] || labelize(item.tone)}</span>
     </article>
   `).join("") : emptyState("No hay alertas internas.");
 }
@@ -419,7 +460,7 @@ function renderClients() {
           <div class="detail-panel">
             <div class="detail-grid">
               <span><strong>Prioridad</strong>${labelize(client.priority || "media")}</span>
-              <span><strong>Ultimo contacto</strong>${client.lastContact ? formatDate(client.lastContact) : "Sin dato"}</span>
+              <span><strong>Último contacto</strong>${client.lastContact ? formatDate(client.lastContact) : "Sin dato"}</span>
               <span><strong>Web</strong>${escapeHTML(client.website || "Sin web")}</span>
               <span><strong>Redes</strong>${escapeHTML(client.socials || "Sin dato")}</span>
             </div>
@@ -427,7 +468,7 @@ function renderClients() {
             <p>${clientProjects.length ? clientProjects.map((project) => escapeHTML(project.name)).join(", ") : "Sin proyectos asociados."}</p>
             <strong>Tareas asociadas</strong>
             <p>${clientTasks.length ? clientTasks.map((task) => escapeHTML(task.title)).join(", ") : "Sin tareas asociadas."}</p>
-            <strong>Facturacion</strong>
+            <strong>Facturación</strong>
             <p>Facturado: ${formatARS(summary?.totalFacturado || 0)} - Cobrado: ${formatARS(summary?.totalCobrado || 0)} - Pendiente: ${formatARS(summary?.totalPendiente || 0)}</p>
             <strong>Notas internas</strong>
             <p>${escapeHTML(client.observations || "Sin notas.")}</p>
@@ -475,7 +516,7 @@ function renderProjects() {
     const financials = projectFinancials(project.id);
     return `
       <tr>
-        <td><div class="entity-title"><strong>${escapeHTML(project.name)}</strong><span>${escapeHTML(project.description || "")}</span><small>${escapeHTML(project.responsible || "Sin responsable")} - ${escapeHTML(project.technologies || "Sin tecnologias")}</small></div></td>
+        <td><div class="entity-title"><strong>${escapeHTML(project.name)}</strong><span>${escapeHTML(project.description || "")}</span><small>${escapeHTML(project.responsible || "Sin responsable")} - ${escapeHTML(project.technologies || "Sin tecnologías")}</small></div></td>
         <td>${escapeHTML(client?.company || "Cliente eliminado")}</td>
         <td>${formatMoney(project.budget, project.currency)}</td>
         <td class="${financials.profit >= 0 ? "amount-positive" : "amount-negative"}">${formatARS(financials.profit)}</td>
@@ -490,7 +531,7 @@ function renderProjects() {
         </td>
       </tr>
     `;
-  }).join("") : tableEmpty(8, availableClients.length ? "No hay proyectos para este filtro." : "Primero tenes que crear un cliente para poder crear un proyecto.");
+  }).join("") : tableEmpty(8, availableClients.length ? "No hay proyectos para este filtro." : "Primero tenés que crear un cliente para poder crear un proyecto.");
 }
 
 function renderFinance() {
@@ -502,7 +543,7 @@ function renderFinance() {
     <article class="stat-card green"><span>Caja total</span><strong>${formatARS(totals.balanceARS)}</strong><small>ARS + USD convertido</small></article>
     <article class="stat-card blue"><span>Caja ARS</span><strong>${formatMoney(totals.ars, "ARS")}</strong><small>Moneda original</small></article>
     <article class="stat-card blue"><span>Caja USD</span><strong>${formatMoney(totals.usd, "USD")}</strong><small>Moneda original</small></article>
-    <article class="stat-card coral"><span>Deuda total</span><strong>${formatARS(billing.pendiente)}</strong><small>Facturacion pendiente</small></article>
+    <article class="stat-card coral"><span>Deuda total</span><strong>${formatARS(billing.pendiente)}</strong><small>Facturación pendiente</small></article>
   `;
   dom.financeSummary.innerHTML = [
     ["Ingresos del mes", formatARS(month.income), "Cobros y entradas"],
@@ -535,7 +576,7 @@ function renderAdministration() {
         <p><strong>Falta hacer:</strong> ${item.pendingWork} tareas abiertas</p>
         <p><strong>Entregado:</strong> ${item.delivered} tareas completadas</p>
         <p><strong>Falta cobrar:</strong> ${formatARS(item.pendingMoney)}</p>
-        <p><strong>Proxima accion:</strong> ${escapeHTML(item.nextAction)}</p>
+        <p><strong>Próxima acción:</strong> ${escapeHTML(item.nextAction)}</p>
       </div>
       <span class="badge ${item.priority}">${labelize(item.priority)}</span>
     </article>
@@ -559,7 +600,7 @@ function renderAdministration() {
 
   dom.actionsList.innerHTML = actions().filter((action) => !selected || action.clientId === selected).slice().sort((a, b) => parseDate(a.dueDate) - parseDate(b.dueDate)).slice(0, 8).map((action) => `
     <article class="list-item"><div><strong>${escapeHTML(action.title)}</strong><span>${escapeHTML(getClient(action.clientId)?.company || "")} - ${formatDate(action.dueDate)}</span></div><div class="actions-cell"><span class="badge ${action.priority}">${labelize(action.status)}</span><button class="ghost-button compact write-action" type="button" onclick="editAction('${action.id}')">Editar</button><button class="danger-button compact delete-action" type="button" onclick="deleteAction('${action.id}')">Eliminar</button></div></article>
-  `).join("") || emptyState("Sin proximas acciones.");
+  `).join("") || emptyState("Sin próximas acciones.");
 }
 
 function renderTasks() {
@@ -622,17 +663,17 @@ function renderSettings() {
   syncCompanySettingsForm();
   dom.settingsSession.innerHTML = `
     <article class="list-item account-profile-item"><div class="user-avatar large" data-session-avatar>${avatarMarkup(user)}</div><div><strong>${escapeHTML(user.name)}</strong><span>@${escapeHTML(user.username || "usuario")} - ${escapeHTML(user.email)}</span></div><span class="badge ${user.role}">${labelize(user.role)}</span></article>
-    <article class="list-item"><div><strong>Permisos</strong><span>${canWrite() ? "Puede crear y editar" : "Solo visualizacion"}</span></div><span class="badge ${canDelete() ? "admin" : "neutral"}">${canDelete() ? "admin" : "limitado"}</span></article>
+    <article class="list-item"><div><strong>Permisos</strong><span>${canWrite() ? "Puede crear y editar" : "Solo visualización"}</span></div><span class="badge ${canDelete() ? "admin" : "neutral"}">${canDelete() ? "admin" : "limitado"}</span></article>
   `;
   if (dom.profilePhotoUrl) dom.profilePhotoUrl.value = user.avatar || "";
   renderAccounts(user);
   const diagnostics = dataIntegrityIssues();
   dom.settingsData.innerHTML = `
     <article class="list-item"><div><strong>Datos locales</strong><span>${clients().length} clientes, ${projects().length} proyectos, ${tasks().length} tareas, ${budgets().length} presupuestos, ${calendarEvents().length} eventos</span></div><span class="badge saludable">localStorage</span></article>
-    <article class="list-item"><div><strong>Version de datos</strong><span>Schema actual ${SCHEMA_VERSION}${state.savedAt ? ` - ultimo guardado ${formatDate(state.savedAt)}` : ""}</span></div><span class="badge neutral">v${state.schemaVersion || SCHEMA_VERSION}</span></article>
-    <article class="list-item"><div><strong>Cotizacion</strong><span>1 USD = ${formatARS(state.exchangeRate)}</span></div><span class="badge neutral">editable</span></article>
+    <article class="list-item"><div><strong>Versión de datos</strong><span>Schema actual ${SCHEMA_VERSION}${state.savedAt ? ` - último guardado ${formatDate(state.savedAt)}` : ""}</span></div><span class="badge neutral">v${state.schemaVersion || SCHEMA_VERSION}</span></article>
+    <article class="list-item"><div><strong>Cotización</strong><span>1 USD = ${formatARS(state.exchangeRate)}</span></div><span class="badge neutral">editable</span></article>
     <article class="list-item"><div><strong>Backup</strong><span>Exporta o importa toda la base local de sWallet.</span></div><span class="badge neutral">JSON</span></article>
-    <article class="list-item"><div><strong>Diagnostico</strong><span>${diagnostics.length ? `${diagnostics.length} alerta(s) de integridad detectada(s)` : "Relaciones principales correctas"}</span></div><span class="badge ${diagnostics.length ? "urgente" : "saludable"}">${diagnostics.length ? "revisar" : "OK"}</span></article>
+    <article class="list-item"><div><strong>Diagnóstico</strong><span>${diagnostics.length ? `${diagnostics.length} alerta(s) de integridad detectada(s)` : "Relaciones principales correctas"}</span></div><span class="badge ${diagnostics.length ? "urgente" : "saludable"}">${diagnostics.length ? "revisar" : "OK"}</span></article>
     ${diagnostics.slice(0, 8).map((item) => `<article class="list-item audit-item"><div><strong>${escapeHTML(item.title)}</strong><span>${escapeHTML(item.detail)}</span></div><span class="badge ${item.tone}">${escapeHTML(item.label)}</span></article>`).join("")}
   `;
   renderSyncConflicts();
@@ -648,7 +689,7 @@ function renderSettings() {
         </div>
         <span class="badge neutral">${escapeHTML(item.view || "sistema")}</span>
       </article>
-    `).join("") : emptyState("Todavia no hay actividad registrada.");
+    `).join("") : emptyState("Todavía no hay actividad registrada.");
   }
 }
 
@@ -678,7 +719,7 @@ function renderAccounts(user) {
     const isSelf = item.id === user.accountId;
     const fromServer = item.source === "env";
     const locked = isSelf || fromServer;
-    const lockedNote = fromServer ? "Definido en el servidor" : isSelf ? "Sesion actual" : "";
+    const lockedNote = fromServer ? "Definido en el servidor" : isSelf ? "Sesión actual" : "";
     const id = escapeAttribute(item.id);
     return `
       <tr>
@@ -706,7 +747,7 @@ function renderAccounts(user) {
           <span class="badge ${escapeAttribute(item.status)}">${item.status === "inactivo" ? "Inactivo" : "Activo"}</span>
         </td>
         <td>${locked ? "" : `<div class="actions-cell">
-          <button class="ghost-button compact" type="button" onclick="resetAuthUserPassword('${id}')">Nueva contrasena</button>
+          <button class="ghost-button compact" type="button" onclick="resetAuthUserPassword('${id}')">Nueva contraseña</button>
           <button class="danger-button compact" type="button" onclick="deleteAuthUser('${id}')">Eliminar</button>
         </div>`}</td>
       </tr>
@@ -805,7 +846,7 @@ function renderInvoices() {
           <span class="badge ${summary.totalVencido > 0 ? "vencida" : summary.totalPendiente > 0 ? "pendiente" : "pagada"}">${summary.status}</span>
         </button>
         <div class="billing-detail ${state.selectedBillingClientId === summary.client.id ? "show" : ""}">
-          <p>${summary.invoiceCount} facturas - ${summary.projectCount} proyectos - Ultimo pago: ${summary.lastPayment ? formatDate(summary.lastPayment.date) : "Sin pagos"} - Proximo vencimiento: ${summary.nextDue ? formatDate(summary.nextDue.dueDate) : "Sin vencimientos"}</p>
+          <p>${summary.invoiceCount} facturas - ${summary.projectCount} proyectos - Último pago: ${summary.lastPayment ? formatDate(summary.lastPayment.date) : "Sin pagos"} - Próximo vencimiento: ${summary.nextDue ? formatDate(summary.nextDue.dueDate) : "Sin vencimientos"}</p>
           <div class="table-wrap mini-table">
             <table>
               <thead><tr><th>Factura</th><th>Proyecto</th><th>Monto</th><th>Cobrado</th><th>Vence</th><th>Estado</th></tr></thead>
@@ -826,7 +867,7 @@ function renderInvoices() {
         </div>
       </article>
     `;
-  }).join("") : emptyState("No hay facturacion para los filtros actuales.");
+  }).join("") : emptyState("No hay facturación para los filtros actuales.");
 
   const invoiceRows = filteredInvoices();
   dom.invoicesTable.innerHTML = invoiceRows.length ? invoiceRows.map((invoice) => `
@@ -905,7 +946,7 @@ function renderCRM() {
             <strong>${escapeHTML(item.title)}</strong>
             <span>${escapeHTML(getClient(item.clientId)?.company || "Sin cliente")}</span>
             <div class="card-meta"><span>${formatMoney(item.value || 0, item.currency || "ARS")}</span><span>${Number(item.probability || 0)}%</span></div>
-            <small>${escapeHTML(item.nextAction || "Sin proxima accion")}</small>
+            <small>${escapeHTML(item.nextAction || "Sin próxima acción")}</small>
             <div class="actions-cell">
               <button class="ghost-button compact write-action" type="button" onclick="editOpportunity('${item.id}')">Editar</button>
               <button class="primary-button compact write-action" type="button" onclick="convertOpportunityToProject('${item.id}')">Proyecto</button>
@@ -930,7 +971,7 @@ function renderBudgets() {
     const total = budgetTotal(item);
     return `
       <tr>
-        <td><div class="entity-title"><strong>${escapeHTML(item.projectName)}</strong><span>${escapeHTML(item.number || "Sin numero")} - ${escapeHTML(getClient(item.clientId)?.company || "Sin cliente")}</span></div></td>
+        <td><div class="entity-title"><strong>${escapeHTML(item.projectName)}</strong><span>${escapeHTML(item.number || "Sin número")} - ${escapeHTML(getClient(item.clientId)?.company || "Sin cliente")}</span></div></td>
         <td>${formatMoney(total, item.currency)}</td>
         <td>${item.discount ? formatMoney(item.discount, item.currency) : "-"}</td>
         <td>${formatDate(item.validUntil)}</td>
@@ -1049,7 +1090,7 @@ function renderMarketing() {
     </tr>
   `).join("") : tableEmpty(5, "No hay campanas cargadas.");
   dom.marketingTemplates.innerHTML = ["Estudios contables", "Arquitectos", "Hoteles", "Restaurantes", "Gimnasios", "Inmobiliarias"].map((target) => `
-    <article class="list-item"><div><strong>${target}</strong><span>Mensaje base: web premium para captar mas consultas y ordenar presencia digital.</span></div></article>
+    <article class="list-item"><div><strong>${target}</strong><span>Mensaje base: web premium para captar más consultas y ordenar presencia digital.</span></div></article>
   `).join("");
 }
 
@@ -1092,7 +1133,7 @@ function renderClientPortal() {
           <p>${escapeHTML(client.service || "Servicios sCode")} · ${escapeHTML(client.email || "Sin email cargado")}</p>
         </div>
         <div class="portal-hero-actions">
-          <span class="badge ${health}">${labelize(health)}</span>
+          <span class="health-pill ${health.tone}">${escapeHTML(health.label)}</span>
           <span class="badge ${normalizeClientStatus(client.status)}">${labelize(normalizeClientStatus(client.status))}</span>
         </div>
       </div>
@@ -1100,7 +1141,7 @@ function renderClientPortal() {
         <article class="stat-card"><span>Proyectos</span><strong>${clientProjects.length}</strong><small>Asociados</small></article>
         <article class="stat-card"><span>Avance promedio</span><strong>${averageProgress}%</strong><small>Delivery visible</small></article>
         <article class="stat-card"><span>Facturado</span><strong>${formatMoney(billedAmount, primaryCurrency)}</strong><small>Total del cliente</small></article>
-        <article class="stat-card"><span>Pendiente</span><strong>${formatMoney(pendingAmount, primaryCurrency)}</strong><small>${nextDue ? `Proximo ${formatDate(nextDue.dueDate)}` : "Sin vencimientos"}</small></article>
+        <article class="stat-card"><span>Pendiente</span><strong>${formatMoney(pendingAmount, primaryCurrency)}</strong><small>${nextDue ? `Próximo ${formatDate(nextDue.dueDate)}` : "Sin vencimientos"}</small></article>
         <article class="stat-card"><span>Archivos</span><strong>${files.length}</strong><small>Documentos y links</small></article>
       </div>
       <div class="portal-layout">
@@ -1115,7 +1156,7 @@ function renderClientPortal() {
                     <div><strong>${escapeHTML(project.name)}</strong><span>${escapeHTML(labelize(project.status))}</span></div>
                     <span class="badge ${project.status}">${Number(project.progress || 0)}%</span>
                   </div>
-                  <p>${escapeHTML(project.description || "Sin descripcion cargada.")}</p>
+                  <p>${escapeHTML(project.description || "Sin descripción cargada.")}</p>
                   <div class="progress-bar"><i style="width:${Number(project.progress || 0)}%"></i></div>
                   <div class="portal-mini-metrics">
                     <span>Presupuesto <strong>${formatMoney(project.budget || 0, project.currency || primaryCurrency)}</strong></span>
@@ -1154,9 +1195,9 @@ function renderClientPortal() {
         </article>
 
         <article class="portal-section">
-          <div class="section-title-row"><div><p class="eyebrow">Agenda</p><h3>Proximos hitos</h3></div></div>
+          <div class="section-title-row"><div><p class="eyebrow">Agenda</p><h3>Próximos hitos</h3></div></div>
           <div class="portal-list">
-            ${clientEvents.length ? clientEvents.map((event) => `<article class="portal-list-item"><div><strong>${escapeHTML(event.title)}</strong><span>${formatDate(event.date)} · ${escapeHTML(event.startTime || "sin hora")}</span></div><span class="badge ${event.type}">${labelize(event.type)}</span></article>`).join("") : emptyState("Sin eventos proximos.")}
+            ${clientEvents.length ? clientEvents.map((event) => `<article class="portal-list-item"><div><strong>${escapeHTML(event.title)}</strong><span>${formatDate(event.date)} · ${escapeHTML(event.startTime || "sin hora")}</span></div><span class="badge ${event.type}">${labelize(event.type)}</span></article>`).join("") : emptyState("Sin eventos próximos.")}
           </div>
         </article>
 
@@ -1248,7 +1289,7 @@ function reportInsights() {
     },
     {
       label: "Comercial",
-      title: `Conversion CRM ${Math.round((wonOpportunities / totalOpportunities) * 100)}%`,
+      title: `Conversión CRM ${Math.round((wonOpportunities / totalOpportunities) * 100)}%`,
       detail: `${sentBudgets} presupuesto(s) enviados esperando respuesta.`,
       tone: sentBudgets ? "pendiente" : "neutral"
     }
@@ -1374,7 +1415,7 @@ export function resetSubscriptionForm() {
   dom.subscriptionForm.reset();
   dom.subscriptionId.value = "";
   dom.subscriptionRenewal.value = toInputDate(new Date(Date.now() + 30 * DAY_MS));
-  dom.subscriptionFormTitle.textContent = "Nueva suscripcion";
+  dom.subscriptionFormTitle.textContent = "Nueva suscripción";
 }
 
 export function resetClientForm() {
@@ -1422,7 +1463,7 @@ export function resetActionForm() {
   if (!dom.actionForm) return;
   dom.actionId.value = "";
   dom.actionDueDate.value = toInputDate(new Date(Date.now() + 3 * DAY_MS));
-  dom.actionFormTitle.textContent = "Nueva accion";
+  dom.actionFormTitle.textContent = "Nueva acción";
 }
 
 export function resetOpportunityForm() {
@@ -1614,7 +1655,7 @@ function getCalendarEvents() {
       title: action.title,
       detail: getClient(action.clientId)?.company || "Seguimiento",
       date: action.dueDate,
-      description: "Proxima accion interna sCode"
+      description: "Próxima acción interna sCode"
     }));
   const projectEvents = projects()
     .filter((project) => project.dueDate && !["finalizado", "entregado", "cancelado"].includes(project.status))
@@ -1712,6 +1753,19 @@ function monthlySeries() {
   });
 }
 
+function chartTheme() {
+  const css = getComputedStyle(document.documentElement);
+  const read = (name, fallback) => css.getPropertyValue(name).trim() || fallback;
+  return {
+    income: read("--chart-income", "#8b5cf6"),
+    expense: read("--chart-expense", "#f97362"),
+    text: read("--text", "#f4f3f8"),
+    muted: read("--text-muted", "#a1a0b0"),
+    grid: read("--chart-grid", "rgba(255,255,255,0.07)"),
+    font: read("--font-sans", "Inter, system-ui, sans-serif")
+  };
+}
+
 function setupCanvas(canvas) {
   if (!canvas) return null;
   const rect = canvas.getBoundingClientRect();
@@ -1727,6 +1781,7 @@ function drawBarChart(canvas, rows) {
   const setup = setupCanvas(canvas);
   if (!setup) return;
   const { ctx, width, height } = setup;
+  const theme = chartTheme();
   const max = Math.max(...rows.flatMap((row) => [row.income, row.expenses]), 1);
   const chartHeight = height - 54;
   const slot = width / rows.length;
@@ -1734,10 +1789,10 @@ function drawBarChart(canvas, rows) {
   drawGrid(ctx, width, height);
   rows.forEach((row, index) => {
     const x = index * slot + slot * 0.22;
-    roundRect(ctx, x, height - (row.income / max) * chartHeight - 28, slot * 0.22, (row.income / max) * chartHeight, 8, "#9f5cff");
-    roundRect(ctx, x + slot * 0.28, height - (row.expenses / max) * chartHeight - 28, slot * 0.22, (row.expenses / max) * chartHeight, 8, "#ff7a59");
-    ctx.fillStyle = "#a9a7ba";
-    ctx.font = "12px Inter";
+    roundRect(ctx, x, height - (row.income / max) * chartHeight - 28, slot * 0.22, (row.income / max) * chartHeight, 6, theme.income);
+    roundRect(ctx, x + slot * 0.28, height - (row.expenses / max) * chartHeight - 28, slot * 0.22, (row.expenses / max) * chartHeight, 6, theme.expense);
+    ctx.fillStyle = theme.muted;
+    ctx.font = `12px ${theme.font}`;
     ctx.fillText(row.label, x - 4, height - 8);
   });
 }
@@ -1746,6 +1801,7 @@ function drawLineChart(canvas, rows) {
   const setup = setupCanvas(canvas);
   if (!setup) return;
   const { ctx, width, height } = setup;
+  const theme = chartTheme();
   const max = Math.max(...rows.map((row) => row.balance), 1);
   const min = Math.min(...rows.map((row) => row.balance), 0);
   const range = Math.max(max - min, 1);
@@ -1759,16 +1815,16 @@ function drawLineChart(canvas, rows) {
   drawGrid(ctx, width, height);
   ctx.beginPath();
   points.forEach((point, index) => index === 0 ? ctx.moveTo(point.x, point.y) : ctx.lineTo(point.x, point.y));
-  ctx.strokeStyle = "#9f5cff";
+  ctx.strokeStyle = theme.income;
   ctx.lineWidth = 3;
   ctx.stroke();
   points.forEach((point) => {
     ctx.beginPath();
     ctx.arc(point.x, point.y, 5, 0, Math.PI * 2);
-    ctx.fillStyle = "#ff7a59";
+    ctx.fillStyle = theme.expense;
     ctx.fill();
-    ctx.fillStyle = "#a9a7ba";
-    ctx.font = "12px Inter";
+    ctx.fillStyle = theme.muted;
+    ctx.font = `12px ${theme.font}`;
     ctx.fillText(point.label, point.x - 16, height - 8);
   });
 }
@@ -1777,25 +1833,32 @@ function drawMiniChart(canvas, rows) {
   const setup = setupCanvas(canvas);
   if (!setup) return;
   const { ctx, width, height } = setup;
+  const theme = chartTheme();
   const totalIncome = rows.reduce((total, row) => total + row.income, 0);
   const totalExpenses = rows.reduce((total, row) => total + row.expenses, 0);
   const max = Math.max(totalIncome, totalExpenses, 1);
+  const barWidth = Math.max(width - 8, 40);
   ctx.clearRect(0, 0, width, height);
-  drawGrid(ctx, width, height);
-  roundRect(ctx, 34, 54, (width - 80) * (totalIncome / max), 42, 16, "#9f5cff");
-  roundRect(ctx, 34, 126, (width - 80) * (totalExpenses / max), 42, 16, "#ff7a59");
-  ctx.fillStyle = "#f7f5ff";
-  ctx.font = "700 14px Inter";
-  ctx.fillText("Ingresos", 34, 42);
-  ctx.fillText("Egresos", 34, 114);
-  ctx.fillStyle = "#a9a7ba";
-  ctx.font = "13px Inter";
-  ctx.fillText(formatARS(totalIncome), 44, 82);
-  ctx.fillText(formatARS(totalExpenses), 44, 154);
+  [["Ingresos", totalIncome, theme.income, 28], ["Egresos", totalExpenses, theme.expense, 118]].forEach(([label, value, color, top]) => {
+    ctx.fillStyle = theme.muted;
+    ctx.font = `500 13px ${theme.font}`;
+    ctx.textAlign = "left";
+    ctx.fillText(label, 4, top);
+    ctx.fillStyle = theme.text;
+    ctx.font = `600 15px ${theme.font}`;
+    ctx.textAlign = "right";
+    ctx.fillText(formatARS(value), width - 4, top);
+    ctx.textAlign = "left";
+    roundRect(ctx, 4, top + 12, barWidth, 14, 7, theme.grid);
+    if (value > 0) roundRect(ctx, 4, top + 12, barWidth * (value / max), 14, 7, color);
+  });
+  ctx.fillStyle = theme.muted;
+  ctx.font = `12px ${theme.font}`;
+  ctx.fillText("Últimos 6 meses", 4, height - 10);
 }
 
 function drawGrid(ctx, width, height) {
-  ctx.strokeStyle = "rgba(255, 255, 255, 0.07)";
+  ctx.strokeStyle = chartTheme().grid;
   ctx.lineWidth = 1;
   for (let y = 24; y < height - 24; y += 38) {
     ctx.beginPath();
@@ -1830,12 +1893,12 @@ const SYNC_COLLECTION_LABELS = {
   invoices: "Factura",
   payments: "Pago",
   movements: "Movimiento",
-  subscriptions: "Suscripcion",
+  subscriptions: "Suscripción",
   tasks: "Tarea",
   goals: "Meta",
   requests: "Solicitud",
   notes: "Nota",
-  actions: "Accion",
+  actions: "Acción",
   opportunities: "Oportunidad",
   budgets: "Presupuesto",
   calendarEvents: "Evento",
@@ -1845,17 +1908,17 @@ const SYNC_COLLECTION_LABELS = {
   marketingCampaigns: "Campana",
   clientPortalItems: "Portal cliente",
   activityLogs: "Historial",
-  companySettings: "Configuracion",
+  companySettings: "Configuración",
   userProfiles: "Perfil",
-  exchangeRate: "Cotizacion"
+  exchangeRate: "Cotización"
 };
 
 const SYNC_FIELD_LABELS = {
   name: "Nombre",
-  title: "Titulo",
+  title: "Título",
   company: "Empresa",
   email: "Email",
-  phone: "Telefono",
+  phone: "Teléfono",
   status: "Estado",
   amount: "Monto",
   paidAmount: "Monto pagado",
@@ -1866,12 +1929,12 @@ const SYNC_FIELD_LABELS = {
   endDate: "Fin",
   notes: "Notas",
   observations: "Observaciones",
-  description: "Descripcion",
+  description: "Descripción",
   priority: "Prioridad",
   progress: "Avance",
   service: "Servicio",
-  number: "Numero",
-  exchangeRate: "Cotizacion"
+  number: "Número",
+  exchangeRate: "Cotización"
 };
 
 // Differences left by automatic merges of concurrent edits (see js/sync-merge.js).
@@ -1888,7 +1951,7 @@ export function renderSyncConflicts() {
   }
 
   if (!conflicts.length && !backup) {
-    container.innerHTML = `<article class="list-item"><div><strong>Sincronizacion</strong><span>No hay diferencias pendientes con otros usuarios.</span></div><span class="badge saludable">OK</span></article>`;
+    container.innerHTML = `<article class="list-item"><div><strong>Sincronización</strong><span>No hay diferencias pendientes con otros usuarios.</span></div><span class="badge saludable">OK</span></article>`;
     return;
   }
 
@@ -1954,13 +2017,33 @@ function syncValueText(value) {
 export function labelize(value) {
   const labels = {
     en_progreso: "en desarrollo",
-    revision: "en revision",
+    revision: "en revisión",
     entregado: "finalizado",
     activo: "cliente activo",
     pendiente: "pendiente",
     finalizado: "proyecto finalizado"
   };
-  return (labels[value] || String(value || "")).replaceAll("_", " ");
+  const text = accentize((labels[value] || String(value || "")).replaceAll("_", " "));
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+const ACCENTED_WORDS = {
+  dias: "días", categoria: "categoría", categorias: "categorías", tecnologia: "tecnología", tecnologias: "tecnologías",
+  telefono: "teléfono", metodo: "método", numero: "número", titulo: "título", ultimo: "último", ultima: "última",
+  proximo: "próximo", proxima: "próxima", analitica: "analítica", tecnico: "técnico", periodo: "período",
+  reunion: "reunión", publico: "público", rapida: "rápida", rapido: "rápido", credito: "crédito", debito: "débito"
+};
+
+/** Display text only: adds the Spanish accents the stored values (and older copy) leave out. */
+export function accentize(text) {
+  return String(text ?? "")
+    .replace(/([A-Za-z]{2,})cion\b/g, "$1ción")
+    .replace(/([A-Za-z]{2,})sion\b/g, "$1sión")
+    .replace(/\b([A-Za-z]+)\b/g, (word) => {
+      const accented = ACCENTED_WORDS[word.toLowerCase()];
+      if (!accented) return word;
+      return word[0] === word[0].toUpperCase() ? accented[0].toUpperCase() + accented.slice(1) : accented;
+    });
 }
 
 function normalizeClientStatus(status) {

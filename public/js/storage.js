@@ -306,7 +306,7 @@ function mergeWithRemote(localPayload, remote) {
   syncFailing = false;
 
   const detail = conflicts.length
-    ? `Se combinaron tus cambios con los de otro usuario. Hay ${conflicts.length} diferencia(s) para revisar en Configuracion > Persistencia.`
+    ? `Se combinaron tus cambios con los de otro usuario. Hay ${conflicts.length} diferencia(s) para revisar en Configuración > Persistencia.`
     : "Se combinaron tus cambios con los que guardo otro usuario.";
   emitSync("merged", detail);
   return payload;
@@ -335,7 +335,7 @@ function storeMergeConflicts(conflicts) {
     const stored = [...entries, ...readSyncConflicts()].slice(0, MAX_STORED_CONFLICTS);
     localStorage.setItem(MERGE_CONFLICTS_KEY, JSON.stringify(stored));
   } catch (error) {
-    console.error("No se pudieron guardar las diferencias de la fusion", error);
+    console.error("No se pudieron guardar las diferencias de la fusión", error);
   }
 }
 
@@ -439,7 +439,7 @@ function handleConflict(rejectedPayload, remote) {
     applySnapshot(remote.snapshot);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(stateSnapshot()));
   }
-  emitSync("conflict", "No se pudieron combinar los cambios. Se cargo la version del servidor y tu version quedo respaldada en Configuracion > Persistencia.");
+  emitSync("conflict", "No se pudieron combinar los cambios. Se cargó la versión del servidor y tu versión quedó respaldada en Configuración > Persistencia.");
 }
 
 export function readConflictBackup() {

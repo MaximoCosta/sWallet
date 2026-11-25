@@ -73,8 +73,19 @@ export function bindEvents() {
     dom.mobileBackdrop.classList.add("show");
   });
   dom.mobileBackdrop.addEventListener("click", closeMobileMenu);
+  dom.sidebarClose?.addEventListener("click", closeMobileMenu);
+  dom.mobileMoreButton?.addEventListener("click", () => {
+    dom.sidebar.classList.add("open");
+    dom.mobileBackdrop.classList.add("show");
+  });
+  dom.themeToggle?.addEventListener("click", toggleTheme);
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    if (document.body.classList.contains("modal-active")) closeModal();
+    else closeMobileMenu();
+  });
   dom.resetDemo.addEventListener("click", () => {
-    if (confirm("Esto eliminara usuarios, sesion y datos locales. Continuar?")) resetStorage();
+    if (confirm("Se borra la copia de este navegador (los cambios sin sincronizar se pierden) y se vuelven a cargar los datos del servidor. ¿Continuar?")) resetStorage();
   });
 
   dom.saveRate.addEventListener("click", saveExchangeRate);
@@ -123,9 +134,6 @@ export function bindEvents() {
     openModal("clientModal");
   });
   dom.modalBackdrop.addEventListener("click", closeModal);
-  document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") closeModal();
-  });
 
   dom.invoiceClient.addEventListener("change", syncControls);
   [dom.taskClient, dom.requestClient, dom.noteClient, dom.actionClient, dom.budgetClient, dom.calendarEventClient, dom.documentClient, dom.supportClient].forEach((control) => control.addEventListener("change", syncControls));
@@ -210,18 +218,31 @@ export function bindEvents() {
   exposeInlineActions();
 }
 
+function toggleTheme() {
+  const root = document.documentElement;
+  const current = root.dataset.theme || (window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+  const next = current === "light" ? "dark" : "light";
+  root.dataset.theme = next;
+  try {
+    localStorage.setItem("swalletTheme", next);
+  } catch {
+    // Theme still applies for this visit when storage is blocked.
+  }
+  renderAll();
+}
+
 function prepareModals() {
   document.querySelectorAll("[data-modal]").forEach((panel) => {
     panel.setAttribute("role", "dialog");
     panel.setAttribute("aria-modal", "true");
     panel.setAttribute("aria-hidden", "true");
-    if (!panel.querySelector("[data-close-modal]")) {
+    if (!panel.querySelector(":scope > .modal-close")) {
       const button = document.createElement("button");
       button.className = "modal-close";
       button.type = "button";
       button.dataset.closeModal = "";
-      button.setAttribute("aria-label", "Cerrar modal");
-      button.textContent = "x";
+      button.setAttribute("aria-label", "Cerrar");
+      button.innerHTML = '<svg aria-hidden="true"><use href="#i-close"/></svg>';
       panel.prepend(button);
     }
   });
@@ -230,7 +251,7 @@ function prepareModals() {
   });
 }
 
-function openModal(id) {
+export function openModal(id) {
   const panel = document.getElementById(id);
   if (!panel) return;
   document.querySelectorAll("[data-modal]").forEach((item) => {
@@ -245,7 +266,7 @@ function openModal(id) {
   panel.querySelector("input:not([type='hidden']), select, textarea")?.focus();
 }
 
-function closeModal() {
+export function closeModal() {
   document.querySelectorAll("[data-modal]").forEach((panel) => {
     panel.classList.remove("modal-open");
     panel.setAttribute("aria-hidden", "true");
@@ -290,7 +311,7 @@ async function handleLogin(event) {
       password: dom.loginPassword.value
     });
     dom.loginError.hidden = true;
-    notify("Bienvenido", "Sesion iniciada correctamente.");
+    notify("Bienvenido", "Sesión iniciada correctamente.");
     renderAll();
   } catch (error) {
     dom.loginError.textContent = error.message;
@@ -420,7 +441,7 @@ function handleInvoiceSubmit(event) {
   if (dom.invoiceId.value) updateRecord(state.invoices, dom.invoiceId.value, payload);
   else state.invoices.push(createRecord(payload));
   resetInvoiceForm();
-  saveAndRender("Factura guardada", "La facturacion fue recalculada.");
+  saveAndRender("Factura guardada", "La facturación fue recalculada.");
 }
 
 function handlePaymentSubmit(event) {
@@ -447,7 +468,7 @@ function handlePaymentSubmit(event) {
   if (dom.paymentId.value) updateRecord(state.payments, dom.paymentId.value, payload);
   else state.payments.push(createRecord(payload));
   resetPaymentForm();
-  saveAndRender("Pago guardado", "La facturacion fue actualizada.");
+  saveAndRender("Pago guardado", "La facturación fue actualizada.");
 }
 
 function handleMovementSubmit(event) {
@@ -485,7 +506,7 @@ function handleSubscriptionSubmit(event) {
   if (dom.subscriptionId.value) updateRecord(state.subscriptions, dom.subscriptionId.value, payload);
   else state.subscriptions.push(createRecord(payload));
   resetSubscriptionForm();
-  saveAndRender("Suscripcion guardada", "Renovaciones actualizadas.");
+  saveAndRender("Suscripción guardada", "Renovaciones actualizadas.");
 }
 
 function handleTaskSubmit(event) {
@@ -552,7 +573,7 @@ function handleRequestSubmit(event) {
   if (dom.requestId.value) updateRecord(state.requests, dom.requestId.value, payload);
   else state.requests.push(createRecord(payload));
   resetRequestForm();
-  saveAndRender("Pedido guardado", "Administracion actualizada.");
+  saveAndRender("Pedido guardado", "Administración actualizada.");
 }
 
 function handleNoteSubmit(event) {
@@ -578,7 +599,7 @@ function handleNoteSubmit(event) {
 function handleActionSubmit(event) {
   event.preventDefault();
   if (!assertWritable() || !validateForm(dom.actionForm)) return;
-  if (!clientExists(dom.actionClient.value)) return notify("Cliente obligatorio", "La accion debe pertenecer a un cliente.");
+  if (!clientExists(dom.actionClient.value)) return notify("Cliente obligatorio", "La acción debe pertenecer a un cliente.");
   if (dom.actionProject.value && !projectExists(dom.actionProject.value, dom.actionClient.value)) return notify("Proyecto invalido", "El proyecto no pertenece al cliente seleccionado.");
   const payload = {
     userId: state.session.userId,
@@ -592,7 +613,7 @@ function handleActionSubmit(event) {
   if (dom.actionId.value) updateRecord(state.actions, dom.actionId.value, payload);
   else state.actions.push(createRecord(payload));
   resetActionForm();
-  saveAndRender("Accion guardada", "Seguimiento actualizado.");
+  saveAndRender("Acción guardada", "Seguimiento actualizado.");
 }
 
 function handleOpportunitySubmit(event) {
@@ -778,7 +799,7 @@ async function handleAuthUserSubmit(event) {
   const password = dom.authUserPassword.value;
   if (password.length < 8) {
     dom.authUserPassword.classList.add("field-error");
-    notify("Contrasena muy corta", "La contrasena temporal debe tener al menos 8 caracteres.");
+    notify("Contraseña muy corta", "La contraseña temporal debe tener al menos 8 caracteres.");
     return;
   }
   try {
@@ -798,7 +819,7 @@ async function handleAuthUserSubmit(event) {
     });
     dom.authUserForm.reset();
     renderAll();
-    notify("Usuario creado", `@${user.username} ya puede ingresar con la contrasena temporal.`);
+    notify("Usuario creado", `@${user.username} ya puede ingresar con la contraseña temporal.`);
   } catch (error) {
     notify("No se pudo crear el usuario", error.message);
   } finally {
@@ -817,13 +838,13 @@ async function changeAuthUser(id, payload, title) {
 }
 
 async function resetAuthUserPassword(id) {
-  const password = prompt("Nueva contrasena temporal (minimo 8 caracteres):");
+  const password = prompt("Nueva contraseña temporal (mínimo 8 caracteres):");
   if (password === null) return;
   if (password.length < 8) {
-    notify("Contrasena muy corta", "Debe tener al menos 8 caracteres.");
+    notify("Contraseña muy corta", "Debe tener al menos 8 caracteres.");
     return;
   }
-  await changeAuthUser(id, { password }, "Contrasena cambiada");
+  await changeAuthUser(id, { password }, "Contraseña cambiada");
 }
 
 async function deleteAuthUser(id) {
@@ -842,21 +863,21 @@ async function handleOwnPasswordSubmit(event) {
   if (!validateForm(dom.ownPasswordForm)) return;
   const next = dom.ownPasswordNew.value;
   if (next.length < 8) {
-    notify("Contrasena muy corta", "La nueva contrasena debe tener al menos 8 caracteres.");
+    notify("Contraseña muy corta", "La nueva contraseña debe tener al menos 8 caracteres.");
     return;
   }
   if (next !== dom.ownPasswordConfirm.value) {
     dom.ownPasswordConfirm.classList.add("field-error");
-    notify("No coinciden", "Repite la nueva contrasena exactamente igual.");
+    notify("No coinciden", "Repite la nueva contraseña exactamente igual.");
     return;
   }
   try {
     setFormBusy(dom.ownPasswordForm, true);
     await changeOwnPassword(dom.ownPasswordCurrent.value, next);
     dom.ownPasswordForm.reset();
-    notify("Contrasena cambiada", "Usala la proxima vez que ingreses.");
+    notify("Contraseña cambiada", "Usala la próxima vez que ingreses.");
   } catch (error) {
-    notify("No se pudo cambiar la contrasena", error.message);
+    notify("No se pudo cambiar la contraseña", error.message);
   } finally {
     setFormBusy(dom.ownPasswordForm, false);
   }
@@ -901,11 +922,11 @@ function saveExchangeRate() {
   if (!assertWritable()) return;
   const value = Number(dom.exchangeRate.value);
   if (!value || value <= 0) {
-    notify("Cotizacion invalida", "Ingresa un valor mayor a cero.");
+    notify("Cotización inválida", "Ingresá un valor mayor a cero.");
     return;
   }
   state.exchangeRate = value;
-  saveAndRender("Cotizacion actualizada", `1 USD = ${value} ARS.`);
+  saveAndRender("Cotización actualizada", `1 USD = ${value} ARS.`);
 }
 
 function syncPaymentFromInvoice() {
@@ -994,7 +1015,7 @@ function exposeInlineActions() {
   window.editMovement = (id) => editGeneric("movements", id, fillMovementForm);
   window.deleteMovement = (id) => deleteGeneric("movements", id, "Movimiento eliminado");
   window.editSubscription = (id) => editGeneric("subscriptions", id, fillSubscriptionForm);
-  window.deleteSubscription = (id) => deleteGeneric("subscriptions", id, "Suscripcion eliminada");
+  window.deleteSubscription = (id) => deleteGeneric("subscriptions", id, "Suscripción eliminada");
   window.editTask = (id) => editGeneric("tasks", id, fillTaskForm);
   window.deleteTask = (id) => deleteGeneric("tasks", id, "Tarea eliminada");
   window.editGoal = (id) => editGeneric("goals", id, fillGoalForm);
@@ -1004,7 +1025,7 @@ function exposeInlineActions() {
   window.editNote = (id) => editGeneric("notes", id, fillNoteForm);
   window.deleteNote = (id) => deleteGeneric("notes", id, "Nota eliminada");
   window.editAction = (id) => editGeneric("actions", id, fillActionForm);
-  window.deleteAction = (id) => deleteGeneric("actions", id, "Accion eliminada");
+  window.deleteAction = (id) => deleteGeneric("actions", id, "Acción eliminada");
   window.editOpportunity = (id) => editGeneric("opportunities", id, fillOpportunityForm);
   window.deleteOpportunity = (id) => deleteGeneric("opportunities", id, "Oportunidad eliminada");
   window.editBudget = (id) => editGeneric("budgets", id, fillBudgetForm);
@@ -1051,7 +1072,7 @@ function printInvoice(id) {
     title: project?.name || client?.service || "Servicios sCode",
     client,
     meta: [
-      ["Fecha de emision", formatDate(invoice.issueDate)],
+      ["Fecha de emisión", formatDate(invoice.issueDate)],
       ["Fecha de vencimiento", formatDate(invoice.dueDate)],
       ["Estado", labelize(invoice.status)],
       ["Moneda", invoice.currency]
@@ -1104,7 +1125,7 @@ function printBudget(id) {
     title: budget.projectName,
     client,
     meta: [
-      ["Emision", formatDate(budget.issueDate || budget.createdAt)],
+      ["Emisión", formatDate(budget.issueDate || budget.createdAt)],
       ["Valido hasta", formatDate(budget.validUntil)],
       ["Estado", labelize(budget.status)],
       ["Moneda", budget.currency],
@@ -1212,7 +1233,7 @@ function openPrintSheet({ type, number, title, client, meta, rows, totals, notes
       <div><span>Cliente</span><strong>${escapeHTML(client.company || client.name)}</strong></div>
       <div><span>Contacto</span><strong>${escapeHTML(client.name || "-")}</strong></div>
       <div><span>Email</span><strong>${escapeHTML(client.email || "-")}</strong></div>
-      <div><span>Telefono</span><strong>${escapeHTML(client.phone || "-")}</strong></div>
+      <div><span>Teléfono</span><strong>${escapeHTML(client.phone || "-")}</strong></div>
     </section>
   ` : "";
 
@@ -1241,7 +1262,7 @@ function openPrintSheet({ type, number, title, client, meta, rows, totals, notes
           ${clientHtml}
           <section class="sheet-meta">${metaHtml}</section>
           <table>
-            <thead><tr><th>Codigo</th><th>Descripcion</th><th>Cant.</th><th>Unitario</th><th>Importe</th></tr></thead>
+            <thead><tr><th>Código</th><th>Descripción</th><th>Cant.</th><th>Unitario</th><th>Importe</th></tr></thead>
             <tbody>${rowsHtml}</tbody>
           </table>
           <section class="sheet-bottom">
@@ -1460,7 +1481,7 @@ function fillSubscriptionForm(item) {
   dom.subscriptionCurrency.value = item.currency;
   dom.subscriptionRenewal.value = item.renewalDate;
   dom.subscriptionStatus.value = item.status;
-  dom.subscriptionFormTitle.textContent = "Editar suscripcion";
+  dom.subscriptionFormTitle.textContent = "Editar suscripción";
   renderView("suscripciones");
   openModal("subscriptionModal");
 }
@@ -1536,7 +1557,7 @@ function fillActionForm(item) {
   dom.actionDueDate.value = item.dueDate;
   dom.actionPriority.value = item.priority || "media";
   dom.actionStatus.value = item.status || "pendiente";
-  dom.actionFormTitle.textContent = "Editar accion";
+  dom.actionFormTitle.textContent = "Editar acción";
   renderView("administracion");
   openModal("actionModal");
 }

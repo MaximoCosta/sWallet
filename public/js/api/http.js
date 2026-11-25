@@ -33,7 +33,36 @@ export function clearSessionTokens() {
   localStorage.removeItem(REFRESH_TOKEN_KEY);
 }
 
+let refreshInFlight = null;
+
+// Access tokens last 15 minutes: on a 401, renew once with the refresh token and retry the request.
 export async function apiRequest(path, options = {}) {
+  try {
+    return await rawRequest(path, options);
+  } catch (error) {
+    if (error?.status !== 401 || path.startsWith("/auth/") || !getRefreshToken()) throw error;
+    const renewed = await renewSession();
+    if (!renewed) throw error;
+    return rawRequest(path, options);
+  }
+}
+
+function renewSession() {
+  if (!refreshInFlight) {
+    refreshInFlight = rawRequest("/auth/refresh", { method: "POST", body: { refreshToken: getRefreshToken() } })
+      .then((session) => {
+        setSessionTokens(session || {});
+        return Boolean(session?.accessToken);
+      })
+      .catch(() => false)
+      .finally(() => {
+        refreshInFlight = null;
+      });
+  }
+  return refreshInFlight;
+}
+
+async function rawRequest(path, options = {}) {
   let response;
   const controller = new AbortController();
   const timeoutId = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);

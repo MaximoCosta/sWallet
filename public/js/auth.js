@@ -1,6 +1,7 @@
 import { authService } from "./api/authService.js";
 import { state } from "./state.js";
 import { resetAccounts } from "./accounts.js";
+import { resetAssignments } from "./assignments.js";
 import { loadRemoteState, saveState } from "./storage.js";
 
 export function mockHash(value) {
@@ -73,7 +74,10 @@ export async function loadApiCollections() {
 }
 
 function setAuthenticatedUser(user) {
-  if (state.session?.userId && currentUser()?.username !== user.username) resetAccounts();
+  if (state.session?.userId && currentUser()?.username !== user.username) {
+    resetAccounts();
+    resetAssignments();
+  }
   const normalized = normalizeUser(user);
   state.users = [normalized];
   state.session = { userId: normalized.id, createdAt: new Date().toISOString() };
@@ -81,6 +85,7 @@ function setAuthenticatedUser(user) {
 
 function clearAuthState() {
   resetAccounts();
+  resetAssignments();
   state.session = null;
   state.users = [];
   state.clients = [];

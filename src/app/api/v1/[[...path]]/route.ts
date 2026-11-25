@@ -18,6 +18,7 @@ import {
   updateAppUser,
   verifyDatabaseLogin
 } from "@/lib/app-users";
+import { addComment, createTask, deleteTask, getTaskWithEvents, isTaskManager, listAssignees, listTasks, TaskError, updateTask } from "@/lib/app-tasks";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -107,6 +108,29 @@ async function route(request: NextRequest, context: RouteContext) {
       return json({ ok: true });
     }
 
+    if (path === "tasks" || path.startsWith("tasks/")) {
+      const session = await requireSession(request, "access");
+      const actor = { username: session.username, name: session.profile?.name || session.username };
+      const [, id, sub] = path.split("/");
+
+      if (method === "GET" && path === "tasks") {
+        const manager = isTaskManager(session.username);
+        return json({
+          tasks: await listTasks(actor),
+          isManager: manager,
+          assignees: manager ? await listAssignees() : []
+        });
+      }
+      if (method === "POST" && path === "tasks") return json(await createTask(actor, await readJson(request)), 201);
+      if (id && !sub && method === "GET") return json(await getTaskWithEvents(actor, id));
+      if (id && !sub && method === "PATCH") return json(await updateTask(actor, id, await readJson(request)));
+      if (id && !sub && method === "DELETE") {
+        await deleteTask(actor, id);
+        return json({ ok: true });
+      }
+      if (id && sub === "comments" && method === "POST") return json(await addComment(actor, id, await readJson(request)), 201);
+    }
+
     if (path === "users" || path.startsWith("users/")) {
       const session = await requireSession(request, "access");
       if (session.role !== "admin") return json({ message: "Solo un admin puede administrar usuarios." }, 403);
@@ -168,7 +192,7 @@ async function route(request: NextRequest, context: RouteContext) {
 
     return json({ message: "Ruta no encontrada." }, 404);
   } catch (error) {
-    if (error instanceof AppUserError) {
+    if (error instanceof AppUserError || error instanceof TaskError) {
       return json({ message: error.message }, error.status);
     }
     if (error instanceof AuthError) {
@@ -318,7 +342,8 @@ function userPayload(session: Session) {
     ...(profile?.phone ? { phone: profile.phone } : {}),
     ...(profile?.area ? { area: profile.area } : {}),
     ...(profile?.avatar ? { avatar: profile.avatar } : {}),
-    passwordManagedBy: profile ? "user" : "server"
+    passwordManagedBy: profile ? "user" : "server",
+    canAssignTasks: isTaskManager(session.username)
   };
 }
 
