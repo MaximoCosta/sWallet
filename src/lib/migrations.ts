@@ -116,6 +116,13 @@ export function runMigrations() {
 }
 
 async function apply() {
+  // Fast path (every cold start): one query tells whether anything is pending.
+  const [state] = await prisma.$queryRaw<{ ready: boolean; applied: string[] | null }[]>`
+    SELECT to_regclass('"AppMigration"') IS NOT NULL AS "ready",
+           (SELECT array_agg("id") FROM "AppMigration" WHERE to_regclass('"AppMigration"') IS NOT NULL) AS "applied"
+  `.catch(() => [{ ready: false, applied: null }]);
+  if (state?.ready && MIGRATIONS.every((migration) => state.applied?.includes(migration.id))) return;
+
   await prisma.$executeRawUnsafe(`
     CREATE TABLE IF NOT EXISTS "AppMigration" (
       "id" TEXT PRIMARY KEY,

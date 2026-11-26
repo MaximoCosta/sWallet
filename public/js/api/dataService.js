@@ -3,11 +3,11 @@ import { apiRequest } from "./http.js";
 export const dataService = {
   /** Everything, or only what changed after `since` (the serverTime of the previous load). */
   load(since = null) {
-    return apiRequest(since ? `/data?since=${encodeURIComponent(since)}` : "/data");
+    return apiRequest(since ? `/data?since=${encodeURIComponent(since)}` : "/data", { timeout: 30000 });
   },
 
   save(batch) {
-    return apiRequest("/data/batch", { method: "POST", body: batch });
+    return apiRequest("/data/batch", { method: "POST", body: batch, timeout: 30000 });
   },
 
   clearActivity() {

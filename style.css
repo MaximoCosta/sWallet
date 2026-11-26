@@ -2014,6 +2014,24 @@ button.kanban-card:hover {
     gap: 8px;
 }
 
+/* Team access */
+.access-box {
+    display: grid;
+    gap: 12px;
+    padding: 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface-2);
+}
+
+.access-box .form-hint {
+    margin: 0;
+}
+
+.access-box .form-hint:empty {
+    display: none;
+}
+
 /* Settings */
 .settings-users-panel {
     grid-column: 1 / -1;

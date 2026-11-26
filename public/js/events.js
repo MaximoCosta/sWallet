@@ -36,6 +36,7 @@ import {
   resetSupportForm,
   resetSubscriptionForm,
   resetTeamForm,
+  syncTeamAccessFields,
   resetTaskForm,
   syncControls
 } from "./render.js";
@@ -114,6 +115,8 @@ export function bindEvents() {
   dom.documentForm.addEventListener("submit", handleDocumentSubmit);
   dom.supportForm.addEventListener("submit", handleSupportSubmit);
   dom.teamForm.addEventListener("submit", handleTeamSubmit);
+  dom.teamGrantAccess?.addEventListener("change", () => syncTeamAccessFields());
+  dom.teamEmail?.addEventListener("input", () => syncTeamAccessFields({ grant: dom.teamGrantAccess.checked }));
   dom.marketingForm.addEventListener("submit", handleMarketingSubmit);
   if (dom.profilePhotoForm) dom.profilePhotoForm.addEventListener("submit", handleProfilePhotoSubmit);
   if (dom.clearProfilePhoto) dom.clearProfilePhoto.addEventListener("click", clearProfilePhoto);
@@ -742,21 +745,57 @@ function handleSupportSubmit(event) {
   saveAndRender("Mantenimiento guardado", "Soporte actualizado.");
 }
 
-function handleTeamSubmit(event) {
+async function handleTeamSubmit(event) {
   event.preventDefault();
   if (!assertWritable() || !validateForm(dom.teamForm)) return;
   const payload = {
-    userId: state.session.userId,
     name: dom.teamName.value.trim(),
-    email: dom.teamEmail.value.trim(),
+    email: dom.teamEmail.value.trim().toLowerCase(),
     role: dom.teamRole.value.trim(),
     status: dom.teamStatus.value,
     focus: dom.teamFocus.value.trim()
   };
+
+  // Optional: create the sWallet login in the same step, so the person can receive tasks.
+  let accountMessage = "";
+  if (isAdmin() && dom.teamGrantAccess?.checked && !dom.teamAccessFields.hidden) {
+    const password = dom.teamAccessPassword.value;
+    if (password.length < 8) {
+      dom.teamAccessPassword.classList.add("field-error");
+      notify("Falta la contraseña", "La contraseña temporal debe tener al menos 8 caracteres.");
+      return;
+    }
+    try {
+      setFormBusy(dom.teamForm, true);
+      const account = await createAccount({
+        name: payload.name,
+        email: payload.email,
+        password,
+        role: dom.teamAccessRole.value,
+        status: payload.status === "inactivo" ? "inactivo" : "activo",
+        area: payload.role
+      });
+      accountMessage = ` ${account.email} ya puede entrar a sWallet y recibir tareas.`;
+    } catch (error) {
+      notify("No se pudo dar acceso", error.message);
+      return;
+    } finally {
+      setFormBusy(dom.teamForm, false);
+    }
+  }
+
   if (dom.teamId.value) updateRecord(state.teamMembers, dom.teamId.value, payload);
   else state.teamMembers.push(createRecord(payload));
   resetTeamForm();
-  saveAndRender("Miembro guardado", "Equipo actualizado.");
+  saveAndRender("Miembro guardado", `Equipo actualizado.${accountMessage}`);
+}
+
+function grantTeamAccess(id) {
+  const item = state.teamMembers.find((member) => member.id === id);
+  if (!item || !isAdmin()) return;
+  fillTeamForm(item);
+  syncTeamAccessFields({ grant: true });
+  dom.teamAccessPassword.focus();
 }
 
 function handleMarketingSubmit(event) {
@@ -1076,6 +1115,7 @@ function exposeInlineActions() {
   window.editSupportPlan = (id) => editGeneric("supportPlans", id, fillSupportForm);
   window.deleteSupportPlan = (id) => deleteGeneric("supportPlans", id, "Mantenimiento eliminado");
   window.editTeamMember = (id) => editGeneric("teamMembers", id, fillTeamForm);
+  window.grantTeamAccess = grantTeamAccess;
   window.deleteTeamMember = (id) => deleteGeneric("teamMembers", id, "Miembro eliminado");
   window.editMarketingCampaign = (id) => editGeneric("marketingCampaigns", id, fillMarketingForm);
   window.deleteMarketingCampaign = (id) => deleteGeneric("marketingCampaigns", id, "Campana eliminada");
@@ -1708,6 +1748,7 @@ function fillTeamForm(item) {
   dom.teamStatus.value = item.status || "activo";
   dom.teamFocus.value = item.focus || "";
   dom.teamFormTitle.textContent = "Editar miembro";
+  syncTeamAccessFields();
   renderView("equipo");
   openModal("teamModal");
 }

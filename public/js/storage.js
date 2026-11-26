@@ -91,6 +91,9 @@ export function clearLocalData() {
   settingsBaseline = {};
   serverTime = null;
   loadedFromServer = false;
+  loadAttempts = 0;
+  if (loadRetryTimer) window.clearTimeout(loadRetryTimer);
+  loadRetryTimer = null;
   state.activityLogs = [];
   stopPolling();
   writeCache();
@@ -103,21 +106,47 @@ export function resetStorage() {
 
 /* ---------- Pull ---------- */
 
-/** Full load after login. Local edits that were never sent are kept and pushed right after. */
-export async function loadRemoteState() {
-  let payload;
-  try {
-    payload = await dataService.load();
-  } catch (error) {
-    console.error("No se pudieron cargar los datos del servidor", error);
-    emitSync("error", `${error?.message || "No se pudo conectar con el servidor."} Se muestran los datos guardados en este navegador.`);
-    return;
+/** Full load after login. Local edits that were never sent are kept and pushed right after.
+ *  If it fails, it keeps retrying: nothing is sent until the server copy is known. */
+let loadingRemote = null;
+let loadRetryTimer = null;
+let loadAttempts = 0;
+
+export function loadRemoteState() {
+  if (loadingRemote) return loadingRemote;
+  if (loadRetryTimer) {
+    window.clearTimeout(loadRetryTimer);
+    loadRetryTimer = null;
   }
-  applyServerPayload(payload, { full: true });
-  loadedFromServer = true;
-  writeCache();
-  startPolling();
-  if (hasLocalChanges()) schedulePush(0);
+  loadingRemote = dataService.load()
+    .then((payload) => {
+      applyServerPayload(payload, { full: true });
+      loadedFromServer = true;
+      loadAttempts = 0;
+      const recovered = syncStatus.failing;
+      syncStatus.failing = false;
+      syncStatus.lastError = "";
+      writeCache();
+      startPolling();
+      if (recovered) emitSync("recovered", "Conexión recuperada: los datos están al día.");
+      else emitSync("changed", "");
+      if (hasLocalChanges()) schedulePush(0);
+    })
+    .catch((error) => {
+      console.error("No se pudieron cargar los datos del servidor", error);
+      loadAttempts += 1;
+      const firstFailure = !syncStatus.failing;
+      syncStatus.failing = true;
+      syncStatus.lastError = error?.message || "No se pudo conectar con el servidor.";
+      if (firstFailure) emitSync("error", `${syncStatus.lastError} Se reintenta solo; lo que cargues queda guardado en este navegador hasta que se conecte.`);
+      if (getAccessToken()) {
+        loadRetryTimer = window.setTimeout(loadRemoteState, Math.min(5000 * loadAttempts, 30000));
+      }
+    })
+    .finally(() => {
+      loadingRemote = null;
+    });
+  return loadingRemote;
 }
 
 async function pullChanges() {
@@ -257,7 +286,12 @@ function currentUserCanWrite() {
 }
 
 async function pushChanges() {
-  if (!loadedFromServer || !currentUserCanWrite()) return; // never send before the server copy is known
+  if (!currentUserCanWrite()) return;
+  if (!loadedFromServer) {
+    // Never send before the server copy is known: load it first (the load pushes pending edits).
+    if (getAccessToken()) loadRemoteState();
+    return;
+  }
   if (pushing) {
     pushAgain = true;
     return;

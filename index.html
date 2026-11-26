@@ -1189,10 +1189,18 @@
                             <label>Email<input id="teamEmail" required type="email"></label>
                             <div class="form-row"><label>Rol<input id="teamRole" required type="text" placeholder="Administrador, Finanzas, Desarrollador..."></label><label>Estado<select id="teamStatus" required><option value="activo">Activo</option><option value="inactivo">Inactivo</option></select></label></div>
                             <label>Foco / permisos<input id="teamFocus" type="text"></label>
+                            <div class="access-box" id="teamAccessBox" hidden>
+                                <label class="check-toggle"><input id="teamGrantAccess" type="checkbox">Darle acceso a sWallet (entra con este email y puede recibir tareas)</label>
+                                <div class="form-row" id="teamAccessFields" hidden>
+                                    <label>Permisos en la app<select id="teamAccessRole"><option value="finanzas">Finanzas: crea y edita</option><option value="solo_lectura">Solo lectura</option><option value="admin">Admin: todo, incluido borrar</option></select></label>
+                                    <label>Contraseña temporal<input id="teamAccessPassword" type="password" minlength="8" autocomplete="new-password" placeholder="Mínimo 8 caracteres"></label>
+                                </div>
+                                <p class="form-hint" id="teamAccessHint"></p>
+                            </div>
                             <div class="form-actions"><button class="ghost-button" id="cancelTeamEdit" type="button">Cancelar</button><button class="primary-button" type="submit">Guardar miembro</button></div>
                         </form>
                     </section>
-                    <section class="panel"><div class="panel-header"><div><p class="eyebrow">Roles</p><h2>Equipo interno</h2></div><button class="primary-button compact write-action" data-open-modal="teamModal" type="button">Nuevo miembro</button></div><div class="table-wrap"><table><thead><tr><th>Miembro</th><th>Rol</th><th>Foco</th><th>Estado</th><th>Acciones</th></tr></thead><tbody id="teamTable"></tbody></table></div></section>
+                    <section class="panel"><div class="panel-header"><div><p class="eyebrow">Roles</p><h2>Equipo interno</h2></div><button class="primary-button compact write-action" data-open-modal="teamModal" type="button">Nuevo miembro</button></div><div class="table-wrap"><table><thead><tr><th>Miembro</th><th>Rol</th><th>Foco</th><th>Estado</th><th>Acceso a sWallet</th><th>Acciones</th></tr></thead><tbody id="teamTable"></tbody></table></div></section>
                 </div>
             </section>
 

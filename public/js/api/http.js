@@ -65,10 +65,11 @@ function renewSession() {
 async function rawRequest(path, options = {}) {
   let response;
   const controller = new AbortController();
-  const timeoutId = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timeoutId = window.setTimeout(() => controller.abort(), options.timeout || REQUEST_TIMEOUT_MS);
   try {
+    const { timeout: _timeout, ...fetchOptions } = options;
     response = await fetch(`${API_BASE_URL}${path}`, {
-      ...options,
+      ...fetchOptions,
       signal: controller.signal,
       headers: buildHeaders(options.headers),
       body: options.body && typeof options.body !== "string" ? JSON.stringify(options.body) : options.body

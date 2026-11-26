@@ -1067,10 +1067,27 @@ function renderTeam() {
       <td><div class="entity-title"><strong>${escapeHTML(item.name)}</strong><span>${escapeHTML(item.email)}</span></div></td>
       <td>${escapeHTML(item.role)}</td>
       <td>${escapeHTML(item.focus || "-")}</td>
-      <td><span class="badge ${item.status}">${labelize(item.status)}</span></td>
+      <td><span class="badge ${item.status}">${item.status === "inactivo" ? "Inactivo" : "Activo"}</span></td>
+      <td>${teamAccessCell(item)}</td>
       <td><div class="actions-cell"><button class="ghost-button compact write-action" type="button" onclick="editTeamMember('${item.id}')">Editar</button><button class="danger-button compact delete-action" type="button" onclick="deleteTeamMember('${item.id}')">Eliminar</button></div></td>
     </tr>
-  `).join("") : tableEmpty(5, "No hay miembros del equipo.");
+  `).join("") : tableEmpty(6, "No hay miembros del equipo.");
+}
+
+function teamAccessCell(item) {
+  if (!isAdmin()) return `<span class="muted">-</span>`;
+  if (!accounts.loaded) {
+    loadAccounts().then(() => {
+      if (isAuthenticated()) renderTeam();
+    });
+    return `<span class="muted">...</span>`;
+  }
+  const email = String(item.email || "").trim().toLowerCase();
+  const account = email && accounts.list.find((entry) => entry.email === email);
+  if (account) {
+    return `<span class="badge ${account.status === "activo" ? "activo" : "inactivo"}">${account.status === "activo" ? `Sí · ${escapeHTML(labelize(account.role))}` : "Desactivado"}</span>`;
+  }
+  return `<button class="ghost-button compact" type="button" onclick="grantTeamAccess('${escapeAttribute(item.id)}')">Dar acceso</button>`;
 }
 
 function renderMarketing() {
@@ -1520,6 +1537,32 @@ export function resetTeamForm() {
   if (!dom.teamForm) return;
   dom.teamId.value = "";
   dom.teamFormTitle.textContent = "Nuevo miembro";
+  syncTeamAccessFields();
+}
+
+/** Shows the "give access" box only to admins, and only when the email has no account yet. */
+export function syncTeamAccessFields({ grant = false } = {}) {
+  if (!dom.teamAccessBox) return;
+  const admin = isAdmin();
+  dom.teamAccessBox.hidden = !admin;
+  if (!admin) return;
+  if (!accounts.loaded) loadAccounts().then(() => syncTeamAccessFields({ grant: dom.teamGrantAccess.checked }));
+  const email = String(dom.teamEmail.value || "").trim().toLowerCase();
+  const existing = email && accounts.list.find((account) => account.email === email);
+  const toggle = dom.teamGrantAccess.closest("label");
+  if (existing) {
+    toggle.hidden = true;
+    dom.teamGrantAccess.checked = false;
+    dom.teamAccessFields.hidden = true;
+    dom.teamAccessHint.textContent = `Ya tiene acceso (${labelize(existing.role)}). Se administra en Configuración > Usuarios y roles.`;
+    return;
+  }
+  toggle.hidden = false;
+  if (grant) dom.teamGrantAccess.checked = true;
+  dom.teamAccessFields.hidden = !dom.teamGrantAccess.checked;
+  dom.teamAccessHint.textContent = dom.teamGrantAccess.checked
+    ? "Se le crea una cuenta con esta contraseña temporal; la cambia al entrar. Va a aparecer para asignarle tareas."
+    : "";
 }
 
 export function resetMarketingForm() {
@@ -1958,7 +2001,10 @@ export function formatARS(amount) {
 }
 
 export function formatDate(date) {
-  return new Intl.DateTimeFormat("es-AR", { day: "2-digit", month: "short", year: "numeric" }).format(parseDate(date));
+  const parsed = date ? parseDate(date) : null;
+  // A missing or broken date must not stop the whole screen from rendering.
+  if (!parsed || Number.isNaN(parsed.getTime())) return "-";
+  return new Intl.DateTimeFormat("es-AR", { day: "2-digit", month: "short", year: "numeric" }).format(parsed);
 }
 
 export function escapeHTML(value) {

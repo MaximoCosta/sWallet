@@ -25,31 +25,37 @@ export class DataError extends Error {
 
 /* ---------- Read ---------- */
 
-/** Everything (since = null) or only what changed after `since`, plus deletions and recent activity. */
+/** Everything (since = null) or only what changed after `since`, plus deletions and recent activity.
+ *  One SQL statement (one round trip): the app server and the database are in different places. */
 export async function readData(since: Date | null) {
   await runMigrations();
   const serverTime = new Date();
   // Overlap so a write committed while we read is not missed; the client applies changes idempotently.
-  const from = since ? new Date(since.getTime() - 5000) : null;
+  const from = since ? new Date(since.getTime() - 5000) : new Date(0);
+  const parts = COLLECTIONS.map((def) => `'${def.key}', (
+      SELECT COALESCE(json_agg(json_build_object('id', "id", 'data', "data", 'version', "version") ORDER BY "created_at"), '[]'::json)
+      FROM "${def.table}" WHERE "updated_at" > $1)`);
+  const [row] = await prisma.$queryRawUnsafe<{ collections: Record<string, { id: string; data: Record<string, unknown>; version: number }[]>; deletions: { collection: string; id: string }[]; settings: Record<string, unknown> }[]>(
+    `SELECT
+       json_build_object(${parts.join(",\n")}) AS "collections",
+       (SELECT COALESCE(json_agg(json_build_object('collection', "collection", 'id', "id")), '[]'::json) FROM "data_deletions" WHERE "deleted_at" > $1 AND $2) AS "deletions",
+       (SELECT COALESCE(json_object_agg("key", "value"), '{}'::json) FROM "app_settings" WHERE "updated_at" > $1) AS "settings"`,
+    from,
+    Boolean(since)
+  );
 
   const collections: Record<string, unknown[]> = {};
   for (const def of COLLECTIONS) {
-    const rows = from
-      ? await prisma.$queryRawUnsafe<Row[]>(`SELECT "id", "data", "version", "updated_at" FROM "${def.table}" WHERE "updated_at" > $1 ORDER BY "created_at"`, from)
-      : await prisma.$queryRawUnsafe<Row[]>(`SELECT "id", "data", "version", "updated_at" FROM "${def.table}" ORDER BY "created_at"`);
-    collections[def.key] = rows.map((row) => toRecord(def, row));
+    collections[def.key] = (row?.collections?.[def.key] || []).map((item) => ({ ...item.data, id: item.id, _v: item.version }));
   }
-
-  const deletions = from
-    ? await prisma.$queryRaw<{ collection: string; id: string }[]>`SELECT "collection", "id" FROM "data_deletions" WHERE "deleted_at" > ${from}`
-    : [];
-
-  const settingsRows = from
-    ? await prisma.$queryRaw<{ key: string; value: unknown }[]>`SELECT "key", "value" FROM "app_settings" WHERE "updated_at" > ${from}`
-    : await prisma.$queryRaw<{ key: string; value: unknown }[]>`SELECT "key", "value" FROM "app_settings"`;
-  const settings = Object.fromEntries(settingsRows.map((row) => [row.key, row.value]));
-
-  return { serverTime: serverTime.toISOString(), full: !since, collections, deletions, settings, activity: await readActivity() };
+  return {
+    serverTime: serverTime.toISOString(),
+    full: !since,
+    collections,
+    deletions: row?.deletions || [],
+    settings: row?.settings || {},
+    activity: await readActivity()
+  };
 }
 
 async function readActivity() {
