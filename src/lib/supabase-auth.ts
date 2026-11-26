@@ -218,6 +218,52 @@ export async function changePassword(account: AppAccount, currentPassword: strin
   await adminUpdate(account.id, { password: newPassword });
 }
 
+/* ---------- Own profile ---------- */
+
+const AVATAR_BUCKET = "avatars";
+const MAX_AVATAR_BYTES = 900 * 1024;
+
+/** Name and photo of the signed-in user. A photo can be an https URL, a data: URL (uploaded to Storage) or "" to remove it. */
+export async function updateOwnProfile(account: AppAccount, input: Record<string, unknown>) {
+  const meta: Record<string, unknown> = {};
+  if (typeof input.name === "string" && input.name.trim()) meta.name = cleanText(input.name, 80);
+  if (typeof input.avatar === "string") {
+    const avatar = input.avatar.trim();
+    if (!avatar) meta.avatar = "";
+    else if (/^https?:\/\//i.test(avatar)) meta.avatar = avatar.slice(0, 500);
+    else if (avatar.startsWith("data:image/")) meta.avatar = await uploadAvatar(account.id, avatar);
+    else throw new AccountError("La foto debe ser una imagen o un link https.");
+  }
+  if (!Object.keys(meta).length) return account;
+  return adminUpdate(account.id, { user_metadata: meta });
+}
+
+async function uploadAvatar(userId: string, dataUrl: string) {
+  const match = dataUrl.match(/^data:(image\/(png|jpe?g|webp|gif));base64,(.+)$/i);
+  if (!match) throw new AccountError("Formato de imagen no soportado. Usa PNG, JPG, WEBP o GIF.");
+  const bytes = Buffer.from(match[3], "base64");
+  if (bytes.length > MAX_AVATAR_BYTES) throw new AccountError("La imagen debe pesar menos de 900 KB.");
+  const { url } = config();
+  const key = serviceKey();
+  const auth = keyHeaders(key);
+  // Public bucket so the <img> can load it; created on first use.
+  await fetch(`${url}/storage/v1/bucket`, {
+    method: "POST",
+    headers: auth,
+    body: JSON.stringify({ id: AVATAR_BUCKET, name: AVATAR_BUCKET, public: true, file_size_limit: MAX_AVATAR_BYTES })
+  }).catch(() => null);
+  const extension = match[2].toLowerCase() === "jpeg" ? "jpg" : match[2].toLowerCase();
+  const path = `${userId}.${extension}`;
+  const { "Content-Type": _json, ...uploadHeaders } = auth;
+  const response = await fetch(`${url}/storage/v1/object/${AVATAR_BUCKET}/${path}`, {
+    method: "POST",
+    headers: { ...uploadHeaders, "Content-Type": match[1], "x-upsert": "true", "cache-control": "3600" },
+    body: bytes
+  }).catch(() => null);
+  if (!response?.ok) throw new AccountError("No se pudo subir la foto a Supabase Storage.", 503);
+  return `${url}/storage/v1/object/public/${AVATAR_BUCKET}/${path}?v=${Date.now()}`;
+}
+
 /* ---------- Admin (service key) ---------- */
 
 let listCache: { accounts: AppAccount[]; until: number } | null = null;

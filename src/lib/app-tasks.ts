@@ -1,7 +1,7 @@
 // Assigned tasks: task managers (TASK_MANAGER_USERS, Maxi by default) create tasks for the team;
 // every other user only sees the tasks assigned to them and moves them between statuses.
 // People are Supabase Auth accounts: assignee, createdBy and event authors hold the account id.
-// Tables are created on demand, like AppSnapshot.
+// Tables come from src/lib/migrations.ts.
 import { randomUUID } from "crypto";
 import { prisma } from "@/lib/prisma";
 import { listAccounts } from "@/lib/supabase-auth";
@@ -49,43 +49,8 @@ export class TaskError extends Error {
   }
 }
 
-let tablesReady = false;
-
 async function ensureTaskTables() {
-  if (tablesReady) return;
   await runMigrations();
-  await prisma.$executeRawUnsafe(`
-    CREATE TABLE IF NOT EXISTS "AppTask" (
-      "id" TEXT PRIMARY KEY,
-      "title" TEXT NOT NULL,
-      "description" TEXT,
-      "assignee" TEXT NOT NULL,
-      "priority" TEXT NOT NULL DEFAULT 'media',
-      "status" TEXT NOT NULL DEFAULT 'asignada',
-      "dueDate" DATE,
-      "createdBy" TEXT NOT NULL,
-      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      "startedAt" TIMESTAMP(3),
-      "completedAt" TIMESTAMP(3)
-    )
-  `);
-  await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "AppTask_assignee_idx" ON "AppTask" ("assignee")`);
-  await prisma.$executeRawUnsafe(`
-    CREATE TABLE IF NOT EXISTS "AppTaskEvent" (
-      "id" TEXT PRIMARY KEY,
-      "taskId" TEXT NOT NULL REFERENCES "AppTask"("id") ON DELETE CASCADE,
-      "author" TEXT NOT NULL,
-      "authorName" TEXT NOT NULL,
-      "kind" TEXT NOT NULL,
-      "body" TEXT,
-      "fromStatus" TEXT,
-      "toStatus" TEXT,
-      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-  await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "AppTaskEvent_taskId_idx" ON "AppTaskEvent" ("taskId")`);
-  tablesReady = true;
 }
 
 /** People a task can be assigned to: every active Supabase account. */
@@ -106,11 +71,11 @@ export async function listTasks(actor: Actor) {
   await ensureTaskTables();
   const rows = actor.isManager
     ? await prisma.$queryRaw<TaskRow[]>`
-        SELECT t.*, (SELECT COUNT(*) FROM "AppTaskEvent" e WHERE e."taskId" = t."id" AND e."kind" = 'comment') AS "commentCount"
-        FROM "AppTask" t ORDER BY t."createdAt" DESC`
+        SELECT t.*, (SELECT COUNT(*) FROM "assigned_task_events" e WHERE e."taskId" = t."id" AND e."kind" = 'comment') AS "commentCount"
+        FROM "assigned_tasks" t ORDER BY t."createdAt" DESC`
     : await prisma.$queryRaw<TaskRow[]>`
-        SELECT t.*, (SELECT COUNT(*) FROM "AppTaskEvent" e WHERE e."taskId" = t."id" AND e."kind" = 'comment') AS "commentCount"
-        FROM "AppTask" t WHERE t."assignee" = ${actor.id} ORDER BY t."createdAt" DESC`;
+        SELECT t.*, (SELECT COUNT(*) FROM "assigned_task_events" e WHERE e."taskId" = t."id" AND e."kind" = 'comment') AS "commentCount"
+        FROM "assigned_tasks" t WHERE t."assignee" = ${actor.id} ORDER BY t."createdAt" DESC`;
   const names = await accountNames();
   return rows.map((row) => toPublicTask(row, names));
 }
@@ -124,7 +89,7 @@ async function accountNames() {
 export async function getTaskWithEvents(actor: Actor, id: string) {
   const task = await getVisibleTask(actor, id);
   const events = await prisma.$queryRaw<EventRow[]>`
-    SELECT * FROM "AppTaskEvent" WHERE "taskId" = ${id} ORDER BY "createdAt" ASC
+    SELECT * FROM "assigned_task_events" WHERE "taskId" = ${id} ORDER BY "createdAt" ASC
   `;
   return { task: toPublicTask(task, await accountNames()), events: events.map(toPublicEvent) };
 }
@@ -136,7 +101,7 @@ export async function createTask(actor: Actor, input: Record<string, unknown>) {
   const assignee = await cleanAssignee(input.assignee);
   const id = randomUUID();
   await prisma.$executeRaw`
-    INSERT INTO "AppTask" ("id", "title", "description", "assignee", "priority", "status", "dueDate", "createdBy")
+    INSERT INTO "assigned_tasks" ("id", "title", "description", "assignee", "priority", "status", "dueDate", "createdBy")
     VALUES (${id}, ${title}, ${cleanDescription(input.description)}, ${assignee}, ${cleanPriority(input.priority)},
             'asignada', ${cleanDueDate(input.dueDate)}::date, ${actor.id})
   `;
@@ -193,7 +158,7 @@ export async function updateTask(actor: Actor, id: string, input: Record<string,
 
   // Timestamps follow the status: startedAt is kept once set, completedAt only while completed.
   await prisma.$executeRaw`
-    UPDATE "AppTask" SET
+    UPDATE "assigned_tasks" SET
       "title" = ${title}, "description" = ${description}, "assignee" = ${assignee}, "priority" = ${priority},
       "dueDate" = ${dueDate}::date, "status" = ${status}, "updatedAt" = CURRENT_TIMESTAMP,
       "startedAt" = CASE WHEN ${status}::text <> 'asignada' THEN COALESCE("startedAt", CURRENT_TIMESTAMP) ELSE "startedAt" END,
@@ -212,7 +177,7 @@ export async function updateTask(actor: Actor, id: string, input: Record<string,
 export async function deleteTask(actor: Actor, id: string) {
   assertManager(actor);
   await getVisibleTask(actor, id);
-  await prisma.$executeRaw`DELETE FROM "AppTask" WHERE "id" = ${id}`;
+  await prisma.$executeRaw`DELETE FROM "assigned_tasks" WHERE "id" = ${id}`;
 }
 
 export async function addComment(actor: Actor, id: string, input: Record<string, unknown>) {
@@ -220,13 +185,13 @@ export async function addComment(actor: Actor, id: string, input: Record<string,
   const body = String(input.body ?? "").trim().slice(0, 2000);
   if (!body) throw new TaskError("Escribí un comentario.");
   await addEvent(id, actor, "comment", body, null, null);
-  await prisma.$executeRaw`UPDATE "AppTask" SET "updatedAt" = CURRENT_TIMESTAMP WHERE "id" = ${id}`;
+  await prisma.$executeRaw`UPDATE "assigned_tasks" SET "updatedAt" = CURRENT_TIMESTAMP WHERE "id" = ${id}`;
   return getTaskWithEvents(actor, id);
 }
 
 async function getVisibleTask(actor: Actor, id: string) {
   await ensureTaskTables();
-  const rows = await prisma.$queryRaw<TaskRow[]>`SELECT * FROM "AppTask" WHERE "id" = ${id} LIMIT 1`;
+  const rows = await prisma.$queryRaw<TaskRow[]>`SELECT * FROM "assigned_tasks" WHERE "id" = ${id} LIMIT 1`;
   const task = rows[0];
   const visible = task && (actor.isManager || task.assignee === actor.id);
   if (!visible) throw new TaskError("Tarea no encontrada.", 404);
@@ -235,7 +200,7 @@ async function getVisibleTask(actor: Actor, id: string) {
 
 async function addEvent(taskId: string, actor: Actor, kind: string, body: string | null, fromStatus: string | null, toStatus: string | null) {
   await prisma.$executeRaw`
-    INSERT INTO "AppTaskEvent" ("id", "taskId", "author", "authorName", "kind", "body", "fromStatus", "toStatus")
+    INSERT INTO "assigned_task_events" ("id", "taskId", "author", "authorName", "kind", "body", "fromStatus", "toStatus")
     VALUES (${randomUUID()}, ${taskId}, ${actor.id}, ${actor.name || actor.email}, ${kind}, ${body}, ${fromStatus}, ${toStatus})
   `;
 }

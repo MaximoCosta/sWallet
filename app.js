@@ -10,17 +10,10 @@ document.addEventListener("DOMContentLoaded", async () => {
   bindEvents();
   window.addEventListener(SYNC_EVENT, (event) => {
     const { type, message } = event.detail || {};
-    if (type === "merged") {
-      renderAll();
-      notify("Cambios combinados", message);
-    } else if (type === "conflict") {
-      renderAll();
-      notify("Datos actualizados", message);
-    } else if (type === "error") {
-      notify("Sin sincronizar", message);
-    } else if (type === "recovered") {
-      notify("Sincronizado", message);
-    }
+    renderAll();
+    if (type === "conflict") notify("Datos actualizados", message);
+    else if (type === "error") notify("Sin sincronizar", message);
+    else if (type === "recovered") notify("Sincronizado", message);
   });
   restoreSession().then(() => {
     renderAll();

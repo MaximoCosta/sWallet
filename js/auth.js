@@ -2,11 +2,7 @@ import { authService } from "./api/authService.js";
 import { state } from "./state.js";
 import { resetAccounts } from "./accounts.js";
 import { resetAssignments } from "./assignments.js";
-import { loadRemoteState, saveState } from "./storage.js";
-
-export function mockHash(value) {
-  return btoa(unescape(encodeURIComponent(String(value))));
-}
+import { clearLocalData, loadRemoteState, saveState } from "./storage.js";
 
 export function hasUsers() {
   return state.users.length > 0;
@@ -73,10 +69,18 @@ export async function loadApiCollections() {
   await loadRemoteState();
 }
 
+/** Updates the signed-in user's profile (name, photo...) without touching the session. */
+export function refreshCurrentUser(user) {
+  if (user) setAuthenticatedUser(user);
+}
+
 function setAuthenticatedUser(user) {
-  if (state.session?.userId && currentUser()?.username !== user.username) {
+  const previous = currentUser();
+  if (previous && previous.accountId !== user.accountId) {
+    // Another person on this browser: do not mix their cached data or pending edits.
     resetAccounts();
     resetAssignments();
+    clearLocalData();
   }
   const normalized = normalizeUser(user);
   state.users = [normalized];
@@ -88,14 +92,11 @@ function clearAuthState() {
   resetAssignments();
   state.session = null;
   state.users = [];
-  state.clients = [];
-  state.projects = [];
+  clearLocalData();
 }
 
 function normalizeUser(user) {
   const username = user.username || String(user.email || "").split("@")[0];
-  // user.id is the shared snapshot key for every account, so profiles are looked up by username only.
-  const profile = state.userProfiles?.[username] || state.userProfiles?.[String(username).toLowerCase()] || {};
   return {
     permissions: [],
     avatar: "",
@@ -103,7 +104,6 @@ function normalizeUser(user) {
     area: "",
     notes: "",
     ...user,
-    ...profile,
     name: user.name || user.email,
     username,
     status: user.status || "activo"

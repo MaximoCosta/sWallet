@@ -1,17 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  experimental: {
-    serverActions: {
-      bodySizeLimit: "8mb"
-    }
-  },
   async rewrites() {
-    return [
-      {
-        source: "/app",
-        destination: "/index.html"
-      }
-    ];
+    // The app is the static page in public/index.html.
+    return [{ source: "/app", destination: "/index.html" }];
   }
 };
 

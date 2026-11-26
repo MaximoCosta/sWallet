@@ -1,6 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { Prisma } from "@prisma/client";
-import { prisma } from "@/lib/prisma";
 import {
   accessFor,
   AccountError,
@@ -16,15 +14,16 @@ import {
   signInWithPassword,
   signOut,
   type AuthTokens,
-  updateAccount
+  updateAccount,
+  updateOwnProfile
 } from "@/lib/supabase-auth";
-import { runMigrations } from "@/lib/migrations";
+import { applyBatch, clearActivity, DataError, readData, type Actor as DataActor } from "@/lib/data-store";
 import { addComment, createTask, deleteTask, getTaskWithEvents, listAssignees, listTasks, TaskError, updateTask } from "@/lib/app-tasks";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Everyone works on the same company data, so the snapshot has a single fixed key.
+// The static app keys its session by this id; every account works on the same company data.
 const SHARED_SNAPSHOT_USER_ID = "shared";
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 const LOGIN_MAX_FAILURES = 10;
@@ -101,6 +100,28 @@ async function route(request: NextRequest, context: RouteContext) {
       return json({ ok: true });
     }
 
+    if (method === "POST" && path === "auth/profile") {
+      const account = await requireAccount(request);
+      return json({ user: userPayload(await updateOwnProfile(account, await readJson(request))) });
+    }
+
+    if (method === "GET" && path === "data") {
+      await requireAccount(request);
+      const since = parseDate(request.nextUrl.searchParams.get("since"));
+      return json(await readData(since));
+    }
+
+    if (method === "POST" && path === "data/batch") {
+      const account = await requireAccount(request);
+      return json(await applyBatch(dataActor(account), await readJson(request)));
+    }
+
+    if (method === "DELETE" && path === "data/activity") {
+      const account = await requireAccount(request);
+      await clearActivity(dataActor(account));
+      return json({ ok: true });
+    }
+
     if (path === "tasks" || path.startsWith("tasks/")) {
       const account = await requireAccount(request);
       const actor = { id: account.id, email: account.email, name: account.name, isManager: account.isTaskManager };
@@ -146,42 +167,9 @@ async function route(request: NextRequest, context: RouteContext) {
       }
     }
 
-    if (method === "GET" && path === "state") {
-      await requireAccount(request);
-      await ensureSnapshotTable();
-      const snapshot = await prisma.appSnapshot.findUnique({
-        where: { userId: SHARED_SNAPSHOT_USER_ID }
-      });
-      return json({ snapshot: snapshot?.data ?? null, updatedAt: snapshot?.updatedAt ?? null });
-    }
-
-    if ((method === "POST" || method === "PUT") && path === "state") {
-      const account = await requireAccount(request);
-      if (!canWriteRole(account.role)) {
-        return json({ message: "Tu usuario es de solo lectura: no puede guardar cambios." }, 403);
-      }
-      const body = await readJson(request);
-      const snapshot = sanitizeSnapshot(body.snapshot ?? body);
-      const baseUpdatedAt = parseBaseUpdatedAt(body.baseUpdatedAt);
-      await ensureSnapshotTable();
-
-      const savedAt = await saveSnapshot(SHARED_SNAPSHOT_USER_ID, snapshot, baseUpdatedAt);
-      if (!savedAt) {
-        const current = await prisma.appSnapshot.findUnique({
-          where: { userId: SHARED_SNAPSHOT_USER_ID }
-        });
-        return json({
-          message: "Otro usuario guardo cambios antes. Se cargo la version mas reciente.",
-          snapshot: current?.data ?? null,
-          updatedAt: current?.updatedAt ?? null
-        }, 409);
-      }
-      return json({ ok: true, updatedAt: savedAt });
-    }
-
     return json({ message: "Ruta no encontrada." }, 404);
   } catch (error) {
-    if (error instanceof AccountError || error instanceof TaskError) {
+    if (error instanceof AccountError || error instanceof TaskError || error instanceof DataError) {
       return json({ message: error.message }, error.status);
     }
     if (error instanceof AuthError) {
@@ -215,36 +203,6 @@ async function login(request: NextRequest) {
 
   loginFailures.delete(clientKey);
   return json(sessionPayload(session.account, session.tokens));
-}
-
-// Optimistic concurrency: a write only lands if the client saw the latest version.
-// Returns the new updatedAt, or null when the stored snapshot changed in the meantime.
-async function saveSnapshot(userId: string, snapshot: Prisma.InputJsonObject, baseUpdatedAt: Date | null) {
-  const updatedAt = new Date();
-
-  if (baseUpdatedAt) {
-    const { count } = await prisma.appSnapshot.updateMany({
-      where: { userId, updatedAt: baseUpdatedAt },
-      data: { data: snapshot, updatedAt }
-    });
-    return count === 1 ? updatedAt : null;
-  }
-
-  try {
-    await prisma.appSnapshot.create({
-      data: { userId, data: snapshot, updatedAt }
-    });
-    return updatedAt;
-  } catch (error) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") return null;
-    throw error;
-  }
-}
-
-function parseBaseUpdatedAt(value: unknown) {
-  if (typeof value !== "string" || !value) return null;
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 // Best effort: counters live per server instance, so on serverless this slows attacks but is not a hard limit.
@@ -337,35 +295,20 @@ async function requireAccount(request: NextRequest) {
   return account;
 }
 
-function sanitizeSnapshot(snapshot: unknown): Prisma.InputJsonObject {
-  if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) {
-    return {};
-  }
+function dataActor(account: AppAccount): DataActor {
   return {
-    ...(snapshot as Prisma.InputJsonObject),
-    savedAt: new Date().toISOString()
+    id: account.id,
+    name: account.name,
+    canWrite: canWriteRole(account.role),
+    canDelete: account.role === "admin",
+    isAdmin: account.role === "admin"
   };
 }
 
-let snapshotTableReady = false;
-
-async function ensureSnapshotTable() {
-  if (snapshotTableReady) return;
-  await runMigrations();
-  await prisma.$executeRawUnsafe(`
-    CREATE TABLE IF NOT EXISTS "AppSnapshot" (
-      "id" TEXT PRIMARY KEY,
-      "userId" TEXT NOT NULL UNIQUE,
-      "data" JSONB NOT NULL,
-      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-  await prisma.$executeRawUnsafe(`
-    CREATE INDEX IF NOT EXISTS "AppSnapshot_updatedAt_idx"
-    ON "AppSnapshot" ("updatedAt")
-  `);
-  snapshotTableReady = true;
+function parseDate(value: string | null) {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 async function routePath(context: RouteContext) {

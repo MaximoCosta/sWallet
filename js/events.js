@@ -1,8 +1,10 @@
-import { canDelete, canWrite, isAdmin, login, logout } from "./auth.js";
+import { canDelete, canWrite, isAdmin, login, logout, refreshCurrentUser } from "./auth.js";
+import { authService } from "./api/authService.js";
+import { dataService } from "./api/dataService.js";
 import { changeOwnPassword, createAccount, deleteAccount, updateAccount } from "./accounts.js";
 import { filteredInvoices, projectExists, clientExists } from "./finance.js";
 import { createRecord, parseDate, state, toInputDate } from "./state.js";
-import { clearConflictBackup, dismissAllSyncConflicts, readConflictBackup, resolveSyncConflict, saveState, resetStorage } from "./storage.js";
+import { exportBackup, importBackup, resetStorage, saveState } from "./storage.js";
 import {
   closeMobileMenu,
   dom,
@@ -39,7 +41,13 @@ import {
 } from "./render.js";
 
 export function bindEvents() {
-  document.getElementById("syncConflictList")?.addEventListener("click", handleSyncConflictClick);
+  dom.exportBackup?.addEventListener("click", downloadBackup);
+  dom.importBackupButton?.addEventListener("click", () => {
+    if (!assertDelete()) return;
+    dom.importBackupFile.click();
+  });
+  dom.importBackupFile?.addEventListener("change", handleImportBackup);
+  dom.clearActivityLog?.addEventListener("click", handleClearActivity);
   dom.loginForm.addEventListener("submit", handleLogin);
   dom.logoutButton.addEventListener("click", async () => {
     await logout();
@@ -774,14 +782,15 @@ function handleMarketingSubmit(event) {
 
 async function handleProfilePhotoSubmit(event) {
   event.preventDefault();
-  if (!assertWritable()) return;
   try {
     setFormBusy(dom.profilePhotoForm, true);
     const avatar = dom.profilePhotoFile?.files?.[0]
       ? await readProfilePhoto(dom.profilePhotoFile.files[0])
       : dom.profilePhotoUrl.value.trim();
-    updateCurrentUserProfile({ avatar });
-    saveAndRender("Foto actualizada", "Tu perfil fue actualizado.");
+    refreshCurrentUser(await authService.updateProfile({ avatar }));
+    if (dom.profilePhotoFile) dom.profilePhotoFile.value = "";
+    renderAll();
+    notify("Foto actualizada", "Tu perfil fue actualizado.");
   } catch (error) {
     notify("No se pudo guardar la foto", error.message);
   } finally {
@@ -882,12 +891,53 @@ async function handleOwnPasswordSubmit(event) {
   }
 }
 
-function clearProfilePhoto() {
-  if (!assertWritable()) return;
+async function clearProfilePhoto() {
   dom.profilePhotoUrl.value = "";
   if (dom.profilePhotoFile) dom.profilePhotoFile.value = "";
-  updateCurrentUserProfile({ avatar: "" });
-  saveAndRender("Foto eliminada", "Tu perfil vuelve a usar iniciales.");
+  try {
+    refreshCurrentUser(await authService.updateProfile({ avatar: "" }));
+    renderAll();
+    notify("Foto eliminada", "Tu perfil vuelve a usar iniciales.");
+  } catch (error) {
+    notify("No se pudo quitar la foto", error.message);
+  }
+}
+
+function downloadBackup() {
+  const blob = new Blob([exportBackup()], { type: "application/json" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = `swallet-backup-${new Date().toISOString().slice(0, 10)}.json`;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+  notify("Backup descargado", "El archivo tiene todos los datos actuales.");
+}
+
+async function handleImportBackup() {
+  const file = dom.importBackupFile.files?.[0];
+  dom.importBackupFile.value = "";
+  if (!file || !assertDelete()) return;
+  if (!confirm("Importar reemplaza TODOS los datos por los del archivo (lo que no esté en el archivo se elimina). ¿Continuar?")) return;
+  try {
+    const total = importBackup(await file.text());
+    renderAll();
+    notify("Backup importado", `${total} registros cargados. Se están guardando en el servidor.`);
+  } catch (error) {
+    notify("No se pudo importar", error.message || "El archivo no es un backup válido.");
+  }
+}
+
+async function handleClearActivity() {
+  if (!assertDelete()) return;
+  if (!confirm("¿Borrar todo el historial de cambios?")) return;
+  try {
+    await dataService.clearActivity();
+    state.activityLogs = [];
+    renderAll();
+    notify("Historial limpio", "Se borró el historial de cambios.");
+  } catch (error) {
+    notify("No se pudo limpiar", error.message);
+  }
 }
 
 function readProfilePhoto(file) {
@@ -902,20 +952,6 @@ function readProfilePhoto(file) {
   });
 }
 
-function updateCurrentUserProfile(payload) {
-  if (!state.session?.userId) return;
-  const user = state.users.find((item) => item.id === state.session.userId);
-  if (!user) return;
-  const username = String(user.username || "").toLowerCase();
-  state.userProfiles = state.userProfiles || {};
-  if (user.username) {
-    state.userProfiles[user.username] = { ...(state.userProfiles[user.username] || {}), ...payload };
-  }
-  if (username) {
-    state.userProfiles[username] = { ...(state.userProfiles[username] || {}), ...payload };
-  }
-  updateRecord(state.users, state.session.userId, payload);
-}
 
 function saveExchangeRate() {
   if (!assertWritable()) return;
@@ -1304,9 +1340,24 @@ function deleteGeneric(key, id, message) {
   saveAndRender(message, "Los datos fueron actualizados.");
 }
 
+const CLIENT_LINKED = {
+  projects: "proyecto", invoices: "factura", payments: "pago", tasks: "tarea", requests: "pedido", notes: "nota",
+  actions: "acción", opportunities: "oportunidad", budgets: "presupuesto", calendarEvents: "evento",
+  documents: "documento", supportPlans: "mantenimiento", clientPortalItems: "recurso del portal"
+};
+
 async function deleteClient(id) {
   if (!assertDelete()) return;
-  if (!confirm("Confirmas eliminar este registro?")) return;
+  // The database refuses to orphan records, so tell the user up front what is still linked.
+  const linked = Object.entries(CLIENT_LINKED)
+    .map(([key, label]) => [state[key]?.filter((record) => record.clientId === id).length || 0, label])
+    .filter(([count]) => count)
+    .map(([count, label]) => `${count} ${label}${count === 1 ? "" : label.endsWith("n") ? "es" : "s"}`);
+  if (linked.length) {
+    notify("No se puede eliminar el cliente", `Tiene ${linked.join(", ")}. Eliminalos o asignalos a otro cliente primero.`);
+    return;
+  }
+  if (!confirm("¿Eliminar este cliente?")) return;
   state.clients = state.clients.filter((record) => record.id !== id);
   saveAndRender("Cliente eliminado", "Supabase fue actualizado.");
 }
@@ -1685,45 +1736,3 @@ function debounce(callback, delay) {
   };
 }
 
-function handleSyncConflictClick(event) {
-  const button = event.target.closest("button");
-  if (!button) return;
-
-  if (button.dataset.syncDismissAll) {
-    dismissAllSyncConflicts();
-    renderAll();
-    notify("Diferencias revisadas", "Se mantuvieron tus valores.");
-    return;
-  }
-
-  if (button.dataset.syncBackup === "download") {
-    const backup = readConflictBackup();
-    if (!backup) return;
-    const url = URL.createObjectURL(new Blob([backup], { type: "application/json" }));
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `swallet-respaldo-conflicto-${new Date().toISOString().slice(0, 10)}.json`;
-    link.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-    return;
-  }
-
-  if (button.dataset.syncBackup === "discard") {
-    if (!confirm("Se borrara el respaldo guardado en este navegador. Continuar?")) return;
-    clearConflictBackup();
-    renderAll();
-    return;
-  }
-
-  const key = button.dataset.syncConflict;
-  const choice = button.dataset.syncChoice;
-  if (!key || !choice) return;
-  if (choice !== "keep" && !canWrite()) {
-    notify("Solo lectura", "Tu rol no permite modificar datos.");
-    return;
-  }
-  if (choice === "delete" && !confirm("Eliminar este registro?")) return;
-  const applied = resolveSyncConflict(key, choice);
-  renderAll();
-  if (!applied) notify("Sin cambios", "El registro ya no existe; se descarto la diferencia.");
-}

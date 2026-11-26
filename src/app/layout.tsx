@@ -1,14 +1,14 @@
 import type { Metadata } from "next";
-import "./globals.css";
 
+// The app itself is the static page in public/ (served at /app). Next only hosts it and the API.
 export const metadata: Metadata = {
-  title: "sCode Finance OS",
-  description: "SaaS interno de finanzas y operaciones para sCode Digital Solutions"
+  title: "sWallet",
+  description: "Finanzas, clientes, proyectos y tareas de sCode Digital Solutions"
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="es" className="dark">
+    <html lang="es">
       <body>{children}</body>
     </html>
   );

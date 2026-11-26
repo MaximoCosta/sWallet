@@ -1,586 +1,499 @@
+// Record-level sync with the server (/api/v1/data).
+//
+// The UI keeps editing plain arrays in `state` and calls saveState(). Here we compare each record
+// with the last version the server confirmed (`baseline`) and send only what changed: new records,
+// edited records (with the version `_v` they were based on) and deletions. If someone else changed
+// the same record first, the server keeps theirs and we load it; other records are not affected.
 import { SCHEMA_VERSION, state, STORAGE_KEY } from "./state.js";
 import { getAccessToken } from "./api/http.js";
-import { authService } from "./api/authService.js";
-import { snapshotService } from "./api/snapshotService.js";
-import { mergeSnapshots } from "./sync-merge.js";
+import { dataService } from "./api/dataService.js";
 
 export const SYNC_EVENT = "swallet:sync";
-const CONFLICT_BACKUP_KEY = `${STORAGE_KEY}:conflictBackup`;
-const MERGE_CONFLICTS_KEY = `${STORAGE_KEY}:mergeConflicts`;
-const MAX_STORED_CONFLICTS = 200;
-const MAX_MERGE_ATTEMPTS = 5;
 
-// Version of the server snapshot this tab last saw. Saves are rejected (409) if it is stale.
-let remoteUpdatedAt = null;
-// Content of that server version, used as the common ancestor when merging concurrent edits.
-let remoteBase = null;
-
-const persistedArrays = [
-  "clients",
-  "projects",
-  "invoices",
-  "payments",
-  "movements",
-  "subscriptions",
-  "tasks",
-  "goals",
-  "requests",
-  "notes",
-  "actions",
-  "opportunities",
-  "budgets",
-  "calendarEvents",
-  "documents",
-  "supportPlans",
-  "teamMembers",
-  "marketingCampaigns",
-  "clientPortalItems",
-  "activityLogs"
+export const COLLECTIONS = [
+  "clients", "projects", "invoices", "payments", "movements", "subscriptions", "tasks", "goals",
+  "requests", "notes", "actions", "opportunities", "budgets", "calendarEvents", "documents",
+  "supportPlans", "teamMembers", "marketingCampaigns", "clientPortalItems"
 ];
+const SETTINGS_KEYS = ["companySettings", "exchangeRate"];
+const CACHE_KEY = `${STORAGE_KEY}:records-v1`;
+const LEGACY_KEYS = [STORAGE_KEY, `${STORAGE_KEY}:conflictBackup`, `${STORAGE_KEY}:mergeConflicts`];
+const RETRY_MS = 15000;
+const POLL_MS = 20000;
+
+const LABELS = {
+  clients: "Cliente", projects: "Proyecto", invoices: "Factura", payments: "Pago", movements: "Movimiento",
+  subscriptions: "Suscripción", tasks: "Tarea", goals: "Meta", requests: "Pedido", notes: "Nota", actions: "Acción",
+  opportunities: "Oportunidad", budgets: "Presupuesto", calendarEvents: "Evento", documents: "Documento",
+  supportPlans: "Mantenimiento", teamMembers: "Miembro del equipo", marketingCampaigns: "Campaña",
+  clientPortalItems: "Recurso del portal"
+};
+
+// collection -> Map(id -> JSON the server confirmed). Settings use the same idea.
+let baseline = emptyBaseline();
+let settingsBaseline = {};
+let serverTime = null;
+let loadedFromServer = false;
+
+export const syncStatus = { pending: 0, failing: false, lastSyncAt: null, lastError: "" };
+
+/* ---------- Local cache ---------- */
 
 export function loadState() {
-  const saved = localStorage.getItem(STORAGE_KEY);
-  if (!saved) return;
-
+  LEGACY_KEYS.forEach((key) => safeRemove(key));
+  let cached = null;
   try {
-    const parsed = migrateSnapshot(JSON.parse(saved));
-    state.schemaVersion = parsed.schemaVersion;
-    state.savedAt = parsed.savedAt || "";
-    state.session = parsed.session || null;
-    state.users = Array.isArray(parsed.users) ? parsed.users : [];
-    state.userProfiles = normalizeProfiles(parsed.userProfiles);
-    persistedArrays.forEach((key) => {
-      state[key] = Array.isArray(parsed[key]) ? parsed[key] : [];
-    });
-    state.companySettings = { ...state.companySettings, ...(parsed.companySettings || {}) };
-    state.exchangeRate = Number(parsed.exchangeRate) || 1200;
-    // Persist migrations locally only: the cache must never be pushed before the remote state is loaded.
-    saveLocalState();
+    cached = JSON.parse(localStorage.getItem(CACHE_KEY) || "null");
   } catch {
-    localStorage.removeItem(STORAGE_KEY);
+    cached = null;
+  }
+  if (!cached || cached.schemaVersion !== SCHEMA_VERSION) return;
+  state.session = cached.session || null;
+  state.users = Array.isArray(cached.users) ? cached.users : [];
+  COLLECTIONS.forEach((key) => {
+    state[key] = Array.isArray(cached.collections?.[key]) ? cached.collections[key] : [];
+  });
+  applySettings(cached.settings || {});
+  baseline = reviveBaseline(cached.baseline);
+  settingsBaseline = cached.settingsBaseline || {};
+  serverTime = cached.serverTime || null;
+}
+
+function writeCache() {
+  const payload = {
+    schemaVersion: SCHEMA_VERSION,
+    session: state.session,
+    users: state.users,
+    collections: Object.fromEntries(COLLECTIONS.map((key) => [key, state[key] || []])),
+    settings: currentSettings(),
+    baseline: Object.fromEntries(COLLECTIONS.map((key) => [key, Object.fromEntries(baseline[key])])),
+    settingsBaseline,
+    serverTime
+  };
+  try {
+    localStorage.setItem(CACHE_KEY, JSON.stringify(payload));
+  } catch {
+    // Cache is a convenience (offline/fast start); the server is the source of truth.
   }
 }
 
+/** Called by the UI after any change. */
 export function saveState() {
-  queueRemoteSave(saveLocalState());
+  writeCache();
+  schedulePush();
 }
 
-function saveLocalState() {
-  state.savedAt = new Date().toISOString();
-  const payload = stateSnapshot();
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
-  return payload;
-}
-
-export function exportSnapshot() {
-  return localStorage.getItem(STORAGE_KEY) || JSON.stringify({
-    schemaVersion: SCHEMA_VERSION,
-    savedAt: new Date().toISOString(),
-    companySettings: state.companySettings,
-    exchangeRate: state.exchangeRate
+export function clearLocalData() {
+  COLLECTIONS.forEach((key) => {
+    state[key] = [];
   });
-}
-
-export function importSnapshot(json) {
-  const parsed = migrateSnapshot(JSON.parse(json));
-  if (!parsed || typeof parsed !== "object") throw new Error("Archivo invalido.");
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
+  baseline = emptyBaseline();
+  settingsBaseline = {};
+  serverTime = null;
+  loadedFromServer = false;
+  state.activityLogs = [];
+  stopPolling();
+  writeCache();
 }
 
 export function resetStorage() {
-  localStorage.removeItem(STORAGE_KEY);
+  safeRemove(CACHE_KEY);
   location.reload();
 }
 
+/* ---------- Pull ---------- */
+
+/** Full load after login. Local edits that were never sent are kept and pushed right after. */
 export async function loadRemoteState() {
   let payload;
   try {
-    payload = await snapshotService.load();
+    payload = await dataService.load();
   } catch (error) {
-    console.error("No se pudo cargar Supabase, usando cache local", error);
+    console.error("No se pudieron cargar los datos del servidor", error);
+    emitSync("error", `${error?.message || "No se pudo conectar con el servidor."} Se muestran los datos guardados en este navegador.`);
     return;
   }
+  applyServerPayload(payload, { full: true });
+  loadedFromServer = true;
+  writeCache();
+  startPolling();
+  if (hasLocalChanges()) schedulePush(0);
+}
 
-  remoteUpdatedAt = payload?.updatedAt || null;
-  if (!payload?.snapshot) {
-    remoteBase = {};
-    return;
+async function pullChanges() {
+  if (!loadedFromServer || !getAccessToken() || pushing) return;
+  try {
+    const payload = await dataService.load(serverTime);
+    if (applyServerPayload(payload, { full: false })) {
+      writeCache();
+      emitSync("changed", "");
+    }
+  } catch {
+    // Polling is best effort; the next tick retries.
+  }
+}
+
+function applyServerPayload(payload, { full }) {
+  let changed = false;
+  for (const key of COLLECTIONS) {
+    const incoming = Array.isArray(payload?.collections?.[key]) ? payload.collections[key] : [];
+    const local = new Map((state[key] || []).map((record) => [record.id, record]));
+    const incomingIds = new Set();
+
+    for (const record of incoming) {
+      incomingIds.add(record.id);
+      const json = stableJson(record);
+      if (baseline[key].get(record.id) === json) continue;
+      const mine = local.get(record.id);
+      const editedHere = mine && isLocallyModified(key, mine);
+      baseline[key].set(record.id, json);
+      if (editedHere) {
+        mine._v = record._v; // keep my edit, but base it on the newest version
+      } else {
+        local.set(record.id, record);
+        changed = true;
+      }
+    }
+
+    if (full) {
+      // Records that are gone from the server, unless they were created here and not sent yet.
+      for (const [id, record] of local) {
+        if (incomingIds.has(id)) continue;
+        if (baseline[key].has(id) || record._v) {
+          local.delete(id);
+          baseline[key].delete(id);
+          changed = true;
+        }
+      }
+      for (const id of [...baseline[key].keys()]) if (!incomingIds.has(id)) baseline[key].delete(id);
+    }
+    state[key] = [...local.values()];
   }
 
-  applySnapshot(payload.snapshot);
-  const snapshot = stateSnapshot();
-  remoteBase = cloneSnapshot(snapshot);
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
+  for (const item of payload?.deletions || []) {
+    if (!baseline[item.collection]) continue;
+    baseline[item.collection].delete(item.id);
+    const before = state[item.collection].length;
+    state[item.collection] = state[item.collection].filter((record) => record.id !== item.id);
+    if (state[item.collection].length !== before) changed = true;
+  }
+
+  const settings = payload?.settings || {};
+  for (const key of SETTINGS_KEYS) {
+    if (!(key in settings)) continue;
+    const json = stableJson(settings[key]);
+    if (settingsBaseline[key] === json) continue;
+    const editedHere = settingsBaseline[key] !== undefined && stableJson(currentSettings()[key]) !== settingsBaseline[key];
+    settingsBaseline[key] = json;
+    if (!editedHere) {
+      applySettings({ [key]: settings[key] });
+      changed = true;
+    }
+  }
+  if (full) {
+    // First run on an empty database: what this browser has is the starting point.
+    SETTINGS_KEYS.forEach((key) => {
+      if (!(key in settings)) delete settingsBaseline[key];
+    });
+  }
+
+  if (Array.isArray(payload?.activity)) {
+    if (stableJson(payload.activity) !== stableJson(state.activityLogs || [])) changed = true;
+    state.activityLogs = payload.activity;
+  }
+  if (payload?.serverTime) serverTime = payload.serverTime;
+  return changed;
 }
 
-export function stateSnapshot() {
-  return persistedArrays.reduce((acc, key) => {
-    acc[key] = normalizeCollection(state[key]);
-    return acc;
-  }, {
-    schemaVersion: SCHEMA_VERSION,
-    savedAt: state.savedAt || new Date().toISOString(),
-    userProfiles: normalizeProfiles(state.userProfiles),
-    companySettings: state.companySettings,
-    exchangeRate: state.exchangeRate
-  });
+/* ---------- Push ---------- */
+
+let pushTimer = null;
+let pushing = null;
+let pushAgain = false;
+
+function schedulePush(delay = 300) {
+  if (!getAccessToken()) return;
+  if (pushTimer) window.clearTimeout(pushTimer);
+  pushTimer = window.setTimeout(() => {
+    pushTimer = null;
+    pushChanges();
+  }, delay);
 }
 
-function applySnapshot(snapshot) {
-  const parsed = migrateSnapshot(snapshot);
-  state.schemaVersion = parsed.schemaVersion;
-  state.savedAt = parsed.savedAt || "";
-  persistedArrays.forEach((key) => {
-    state[key] = Array.isArray(parsed[key]) ? parsed[key] : [];
-  });
-  state.userProfiles = normalizeProfiles(parsed.userProfiles);
-  applyCurrentUserProfile();
-  state.companySettings = { ...state.companySettings, ...(parsed.companySettings || {}) };
-  state.exchangeRate = Number(parsed.exchangeRate) || 1200;
+export function hasLocalChanges() {
+  return Boolean(collectChanges().count);
 }
 
-export function migrateSnapshot(snapshot) {
-  if (!snapshot || typeof snapshot !== "object") throw new Error("Archivo invalido.");
-  const migrated = {
-    ...snapshot,
-    schemaVersion: SCHEMA_VERSION,
-    savedAt: snapshot.savedAt || new Date().toISOString(),
-    session: snapshot.session || null,
-    userProfiles: normalizeProfiles(snapshot.userProfiles),
-    companySettings: migrateCompanySettings(snapshot.companySettings),
-    exchangeRate: Number(snapshot.exchangeRate) || 1200
-  };
-
-  persistedArrays.forEach((key) => {
-    migrated[key] = normalizeCollection(snapshot[key]);
-  });
-  migrated.users = normalizeCollection(snapshot.users);
-
-  migrated.clients = migrated.clients.map(migrateClient);
-  migrated.projects = migrated.projects.map(migrateProject);
-  migrated.invoices = migrated.invoices.map(migrateInvoice);
-  migrated.payments = migrated.payments.map(migratePayment);
-  migrated.tasks = migrated.tasks.map(migrateTask);
-  migrated.goals = migrated.goals.map(migrateGoal);
-  migrated.users = migrated.users.map(migrateUser);
-
-  return migrated;
+function isLocallyModified(key, record) {
+  const synced = baseline[key].get(record.id);
+  return synced === undefined || synced !== stableJson(record);
 }
 
-function migrateCompanySettings(settings = {}) {
-  const migrated = { ...settings };
-  if (!migrated.email || migrated.email === "admin@scode.com") migrated.email = "contact@scodedigital.com";
-  if (!migrated.website || migrated.website === "https://scode.com" || migrated.website === "scode.com") migrated.website = "https://scodedigital.com";
-  return migrated;
+function collectChanges() {
+  const upserts = [];
+  const deletes = [];
+  for (const key of COLLECTIONS) {
+    const ids = new Set();
+    for (const record of state[key] || []) {
+      if (!record?.id) continue;
+      ids.add(record.id);
+      if (isLocallyModified(key, record)) upserts.push({ collection: key, record });
+    }
+    for (const id of baseline[key].keys()) if (!ids.has(id)) deletes.push({ collection: key, id });
+  }
+  const settings = {};
+  const current = currentSettings();
+  for (const key of SETTINGS_KEYS) {
+    if (stableJson(current[key]) !== settingsBaseline[key]) settings[key] = current[key];
+  }
+  const hasSettings = Object.keys(settings).length > 0;
+  return { upserts, deletes, settings: hasSettings ? settings : null, count: upserts.length + deletes.length + (hasSettings ? 1 : 0) };
 }
 
-// Only the latest full snapshot matters, so pending saves are coalesced into one.
-let pendingPayload = null;
-let flushing = null;
-let retryPayload = null;
-let retryTimer = null;
-const RETRY_DELAY_MS = 15000;
+// Mirrors canWrite() in auth.js (not imported: auth.js imports this module).
+function currentUserCanWrite() {
+  const user = state.users.find((item) => item.id === state.session?.userId);
+  return Boolean(user && (user.role === "admin" || user.role === "finanzas" || user.permissions?.includes("write")));
+}
+
+async function pushChanges() {
+  if (!loadedFromServer || !currentUserCanWrite()) return; // never send before the server copy is known
+  if (pushing) {
+    pushAgain = true;
+    return;
+  }
+  const changes = collectChanges();
+  syncStatus.pending = changes.count;
+  if (!changes.count) return;
+
+  const sent = new Map(changes.upserts.map((op) => [`${op.collection}:${op.record.id}`, stableJson(op.record)]));
+  pushing = dataService.save({ upserts: changes.upserts, deletes: changes.deletes, settings: changes.settings })
+    .then((response) => {
+      handlePushResponse(response, changes, sent);
+      const recovered = syncStatus.failing;
+      syncStatus.failing = false;
+      syncStatus.lastError = "";
+      syncStatus.lastSyncAt = new Date().toISOString();
+      if (recovered) emitSync("recovered", "Los cambios pendientes se guardaron.");
+    })
+    .catch((error) => {
+      if (error?.status === 403 || error?.status === 400) {
+        // The server will never accept this batch as is: go back to what it has.
+        revertAll();
+        emitSync("error", error.message || "No tenés permiso para guardar estos cambios.");
+        return;
+      }
+      const firstFailure = !syncStatus.failing;
+      syncStatus.failing = true;
+      syncStatus.lastError = error?.message || "Sin conexión con el servidor.";
+      if (firstFailure) emitSync("error", `${syncStatus.lastError} Los cambios quedan en este navegador y se reintenta solo.`);
+      schedulePush(RETRY_MS);
+    })
+    .finally(() => {
+      pushing = null;
+      writeCache();
+      syncStatus.pending = collectChanges().count;
+      if (pushAgain) {
+        pushAgain = false;
+        schedulePush(0);
+      }
+    });
+  return pushing;
+}
+
+function handlePushResponse(response, changes, sent) {
+  const notices = [];
+  let visibleChange = false;
+
+  for (const result of response?.results || []) {
+    const key = result.collection;
+    if (!baseline[key]) continue;
+    const isDelete = changes.deletes.some((op) => op.collection === key && op.id === result.id);
+
+    if (result.status === "ok") {
+      if (isDelete) continue;
+      acceptServerRecord(key, result.record, sent.get(`${key}:${result.id}`));
+    } else if (result.status === "conflict") {
+      baseline[key].set(result.id, stableJson(result.record));
+      replaceLocal(key, result.record);
+      notices.push(`${LABELS[key] || key} "${recordName(result.record)}" lo cambió otra persona: se cargó su versión.`);
+      visibleChange = true;
+    } else if (result.status === "deleted") {
+      baseline[key].delete(result.id);
+      state[key] = state[key].filter((record) => record.id !== result.id);
+      notices.push(`${LABELS[key] || key}: otra persona lo eliminó.`);
+      visibleChange = true;
+    } else {
+      revertRecord(key, result.id);
+      notices.push(result.message || "No se pudo guardar un registro.");
+      visibleChange = true;
+    }
+  }
+
+  for (const item of response?.changed || []) {
+    if (!baseline[item.collection]) continue;
+    baseline[item.collection].set(item.record.id, stableJson(item.record));
+    replaceLocal(item.collection, item.record);
+    visibleChange = true;
+  }
+
+  if (changes.settings) {
+    Object.entries(changes.settings).forEach(([key, value]) => {
+      settingsBaseline[key] = stableJson(value);
+    });
+  }
+  if (response?.serverTime && !serverTime) serverTime = response.serverTime;
+
+  if (notices.length) emitSync("conflict", notices.slice(0, 3).join(" "));
+  else if (visibleChange) emitSync("changed", "");
+  // Refresh the activity log and anything others saved meanwhile.
+  window.setTimeout(pullChanges, 500);
+}
+
+// Server confirmed my write. If I edited the record again while it was in flight, keep that edit.
+function acceptServerRecord(key, record, sentJson) {
+  baseline[key].set(record.id, stableJson(record));
+  const mine = state[key].find((item) => item.id === record.id);
+  if (!mine) return;
+  const { _v, ...mineData } = mine;
+  const { _v: _sentV, ...sentData } = JSON.parse(sentJson || "{}");
+  if (stableJson(mineData) === stableJson(sentData)) replaceLocal(key, record);
+  else mine._v = record._v;
+}
+
+function replaceLocal(key, record) {
+  const index = state[key].findIndex((item) => item.id === record.id);
+  if (index === -1) state[key].push(record);
+  else state[key][index] = record;
+}
+
+function revertRecord(key, id) {
+  const synced = baseline[key].get(id);
+  if (synced === undefined) state[key] = state[key].filter((record) => record.id !== id);
+  else replaceLocal(key, JSON.parse(synced));
+}
+
+function revertAll() {
+  for (const key of COLLECTIONS) {
+    state[key] = [...baseline[key].values()].map((json) => JSON.parse(json));
+  }
+  for (const key of SETTINGS_KEYS) {
+    if (settingsBaseline[key] !== undefined) applySettings({ [key]: JSON.parse(settingsBaseline[key]) });
+  }
+  emitSync("changed", "");
+}
+
+/* ---------- Polling ---------- */
+
+let pollTimer = null;
+
+function startPolling() {
+  if (pollTimer) return;
+  pollTimer = window.setInterval(() => {
+    if (document.visibilityState === "visible") pullChanges();
+  }, POLL_MS);
+  document.addEventListener("visibilitychange", onVisible);
+}
+
+function stopPolling() {
+  if (pollTimer) window.clearInterval(pollTimer);
+  pollTimer = null;
+  document.removeEventListener("visibilitychange", onVisible);
+}
+
+function onVisible() {
+  if (document.visibilityState === "visible") pullChanges();
+}
 
 window.addEventListener("beforeunload", (event) => {
-  if (!hasUnsyncedChanges()) return;
+  if (!loadedFromServer || !hasLocalChanges()) return;
   event.preventDefault();
   event.returnValue = "";
 });
 
-export function hasUnsyncedChanges() {
-  return Boolean(pendingPayload || flushing || retryPayload);
+/* ---------- Backup ---------- */
+
+export function exportBackup() {
+  return JSON.stringify({
+    app: "sWallet",
+    schemaVersion: SCHEMA_VERSION,
+    exportedAt: new Date().toISOString(),
+    collections: Object.fromEntries(COLLECTIONS.map((key) => [key, (state[key] || []).map(({ _v, ...record }) => record)])),
+    settings: currentSettings()
+  }, null, 2);
 }
 
-function queueRemoteSave(payload) {
-  if (!getAccessToken() || !currentUserCanWrite()) return;
-  pendingPayload = payload;
-  clearRetry();
-  if (flushing) return;
-  flushing = flushRemoteSaves().finally(() => {
-    flushing = null;
-    if (pendingPayload) queueRemoteSave(pendingPayload);
+/** Replaces all data with the file's content (records not in the file are deleted). */
+export function importBackup(json) {
+  const parsed = JSON.parse(json);
+  const source = parsed?.collections || parsed; // also accepts old exports with top-level arrays
+  if (!source || typeof source !== "object") throw new Error("Archivo inválido.");
+  let total = 0;
+  for (const key of COLLECTIONS) {
+    const records = Array.isArray(source[key]) ? source[key].filter((record) => record && typeof record === "object" && record.id) : [];
+    const current = new Map((state[key] || []).map((record) => [record.id, record]));
+    state[key] = records.map(({ _v, ...record }) => (current.get(record.id)?._v ? { ...record, _v: current.get(record.id)._v } : record));
+    total += records.length;
+  }
+  const settings = parsed?.settings || parsed;
+  if (settings?.companySettings) applySettings({ companySettings: settings.companySettings });
+  if (settings?.exchangeRate) applySettings({ exchangeRate: settings.exchangeRate });
+  saveState();
+  return total;
+}
+
+/* ---------- Helpers ---------- */
+
+function currentSettings() {
+  return { companySettings: state.companySettings, exchangeRate: state.exchangeRate };
+}
+
+function applySettings(settings) {
+  if (settings.companySettings && typeof settings.companySettings === "object") {
+    state.companySettings = { ...state.companySettings, ...settings.companySettings };
+  }
+  if (settings.exchangeRate !== undefined) state.exchangeRate = Number(settings.exchangeRate) || state.exchangeRate;
+}
+
+function emptyBaseline() {
+  return Object.fromEntries(COLLECTIONS.map((key) => [key, new Map()]));
+}
+
+function reviveBaseline(raw) {
+  const result = emptyBaseline();
+  if (!raw || typeof raw !== "object") return result;
+  COLLECTIONS.forEach((key) => {
+    Object.entries(raw[key] || {}).forEach(([id, json]) => result[key].set(id, json));
   });
+  return result;
 }
 
-async function flushRemoteSaves() {
-  let mergeAttempts = 0;
-  while (pendingPayload) {
-    const payload = pendingPayload;
-    pendingPayload = null;
-    try {
-      await pushSnapshot(payload);
-    } catch (error) {
-      if (error?.status === 409) {
-        // Merge the newest local state (anything queued supersedes the rejected payload) with the server's.
-        const latestLocal = pendingPayload || payload;
-        mergeAttempts += 1;
-        if (mergeAttempts > MAX_MERGE_ATTEMPTS) {
-          handleConflict(latestLocal, error.details);
-          pendingPayload = null;
-          return;
-        }
-        pendingPayload = mergeWithRemote(latestLocal, error.details);
-        continue;
-      }
-      if (error?.status === 403) {
-        // The role changed to read-only: the server will never accept this write, so do not retry it.
-        pendingPayload = null;
-        emitSync("error", error.message || "Tu usuario no tiene permiso para guardar cambios.");
-        return;
-      }
-      console.error("No se pudo sincronizar con Supabase", error);
-      const firstFailure = !syncFailing;
-      scheduleRetry(pendingPayload || payload);
-      pendingPayload = null;
-      if (firstFailure) {
-        emitSync("error", `${error?.message || "No se pudo guardar en el servidor."} Los cambios quedan en este navegador y se reintenta automaticamente.`);
-      }
-      return;
-    }
-  }
-  if (retryPayload === null) emitSyncRecovered();
-}
-
-let syncFailing = false;
-
-function scheduleRetry(payload) {
-  retryPayload = payload;
-  syncFailing = true;
-  if (retryTimer) return;
-  retryTimer = window.setTimeout(() => {
-    retryTimer = null;
-    const next = retryPayload;
-    if (next) queueRemoteSave(next);
-  }, RETRY_DELAY_MS);
-}
-
-function clearRetry() {
-  if (retryTimer) window.clearTimeout(retryTimer);
-  retryTimer = null;
-  retryPayload = null;
-}
-
-function emitSyncRecovered() {
-  if (!syncFailing) return;
-  syncFailing = false;
-  emitSync("recovered", "Los cambios pendientes se guardaron en el servidor.");
-}
-
-async function pushSnapshot(payload) {
-  let result;
-  try {
-    result = await snapshotService.save(payload, remoteUpdatedAt);
-  } catch (error) {
-    if (error?.status !== 401) throw error;
-    const session = await authService.refresh().catch(() => null);
-    if (!session) throw error;
-    result = await snapshotService.save(payload, remoteUpdatedAt);
-  }
-  remoteUpdatedAt = result?.updatedAt || remoteUpdatedAt;
-  remoteBase = cloneSnapshot(payload);
-}
-
-// Three-way merge of this browser's state with the version another user saved first.
-// Applies the result locally and returns the payload to push (on top of the server's version).
-function mergeWithRemote(localPayload, remote) {
-  remoteUpdatedAt = remote?.updatedAt || null;
-  if (!remote?.snapshot) {
-    remoteBase = {};
-    return localPayload;
-  }
-
-  const remoteSnapshot = comparable(remote.snapshot);
-  const { merged, conflicts } = mergeSnapshots({
-    base: remoteBase ? comparable(remoteBase) : {},
-    local: comparable(localPayload),
-    remote: remoteSnapshot,
-    collections: persistedArrays
-  });
-
-  applySnapshot(merged);
-  state.savedAt = merged.savedAt;
-  const payload = stateSnapshot();
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
-  remoteBase = remoteSnapshot;
-  storeMergeConflicts(conflicts);
-  syncFailing = false;
-
-  const detail = conflicts.length
-    ? `Se combinaron tus cambios con los de otro usuario. Hay ${conflicts.length} diferencia(s) para revisar en Configuración > Persistencia.`
-    : "Se combinaron tus cambios con los que guardo otro usuario.";
-  emitSync("merged", detail);
-  return payload;
-}
-
-function comparable(snapshot) {
-  const migrated = migrateSnapshot(cloneSnapshot(snapshot));
-  delete migrated.session;
-  delete migrated.users;
-  return migrated;
-}
-
-function cloneSnapshot(snapshot) {
-  return JSON.parse(JSON.stringify(snapshot));
-}
-
-function storeMergeConflicts(conflicts) {
-  if (!conflicts.length) return;
-  const at = new Date().toISOString();
-  const entries = conflicts.map((conflict) => ({
-    ...conflict,
-    key: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
-    at
-  }));
-  try {
-    const stored = [...entries, ...readSyncConflicts()].slice(0, MAX_STORED_CONFLICTS);
-    localStorage.setItem(MERGE_CONFLICTS_KEY, JSON.stringify(stored));
-  } catch (error) {
-    console.error("No se pudieron guardar las diferencias de la fusión", error);
-  }
-}
-
-export function readSyncConflicts() {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(MERGE_CONFLICTS_KEY) || "[]");
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-function writeSyncConflicts(conflicts) {
-  if (conflicts.length) localStorage.setItem(MERGE_CONFLICTS_KEY, JSON.stringify(conflicts));
-  else localStorage.removeItem(MERGE_CONFLICTS_KEY);
-}
-
-/**
- * Resolves one stored merge difference.
- * choice "keep": keep the current value. "remote": use the other user's value.
- * "delete": delete the record that was kept because one side deleted it.
- * Returns false when the record no longer exists (the difference is dismissed anyway).
- */
-export function resolveSyncConflict(key, choice) {
-  const conflicts = readSyncConflicts();
-  const conflict = conflicts.find((item) => item.key === key);
-  if (!conflict) return false;
-  writeSyncConflicts(conflicts.filter((item) => item.key !== key));
-  if (choice === "keep") return true;
-
-  const applied = choice === "delete" ? deleteConflictRecord(conflict) : applyRemoteValue(conflict);
-  if (applied) saveState();
-  return applied;
-}
-
-export function dismissAllSyncConflicts() {
-  writeSyncConflicts([]);
-}
-
-function applyRemoteValue(conflict) {
-  const value = conflict.remoteValue === null ? undefined : conflict.remoteValue;
-  if (conflict.collection === "exchangeRate") {
-    state.exchangeRate = Number(value) || state.exchangeRate;
-    return true;
-  }
-  if (conflict.collection === "companySettings") {
-    state.companySettings = setField(state.companySettings, conflict.field, value);
-    return true;
-  }
-  if (conflict.collection === "userProfiles") {
-    const profiles = { ...(state.userProfiles || {}) };
-    if (conflict.field) profiles[conflict.id] = setField(profiles[conflict.id] || {}, conflict.field, value);
-    else if (value === undefined) delete profiles[conflict.id];
-    else profiles[conflict.id] = value;
-    state.userProfiles = profiles;
-    return true;
-  }
-  const collection = state[conflict.collection];
-  if (!Array.isArray(collection)) return false;
-  const index = collection.findIndex((item) => item.id === conflict.id);
-  if (index === -1) return false;
-  collection[index] = { ...setField(collection[index], conflict.field, value), updatedAt: new Date().toISOString() };
-  return true;
-}
-
-function deleteConflictRecord(conflict) {
-  const collection = state[conflict.collection];
-  if (!Array.isArray(collection)) return false;
-  const index = collection.findIndex((item) => item.id === conflict.id);
-  if (index === -1) return false;
-  collection.splice(index, 1);
-  return true;
-}
-
-function setField(record, field, value) {
-  const next = { ...(record || {}) };
-  if (value === undefined) delete next[field];
-  else next[field] = value;
-  return next;
-}
-
-export function clearConflictBackup() {
-  localStorage.removeItem(CONFLICT_BACKUP_KEY);
-}
-
-// Last resort when merging keeps failing: load the server version and keep a full local backup.
-function handleConflict(rejectedPayload, remote) {
-  try {
-    localStorage.setItem(CONFLICT_BACKUP_KEY, JSON.stringify({
-      rejectedAt: new Date().toISOString(),
-      snapshot: rejectedPayload
-    }));
-  } catch (error) {
-    console.error("No se pudo guardar el respaldo del conflicto", error);
-  }
-
-  syncFailing = false;
-  remoteUpdatedAt = remote?.updatedAt || null;
-  remoteBase = remote?.snapshot ? comparable(remote.snapshot) : {};
-  if (remote?.snapshot) {
-    applySnapshot(remote.snapshot);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(stateSnapshot()));
-  }
-  emitSync("conflict", "No se pudieron combinar los cambios. Se cargó la versión del servidor y tu versión quedó respaldada en Configuración > Persistencia.");
-}
-
-export function readConflictBackup() {
-  return localStorage.getItem(CONFLICT_BACKUP_KEY);
+function recordName(record) {
+  return String(record?.company || record?.name || record?.title || record?.projectName || record?.number || record?.description || record?.category || "sin nombre").slice(0, 60);
 }
 
 function emitSync(type, message) {
   window.dispatchEvent(new CustomEvent(SYNC_EVENT, { detail: { type, message } }));
 }
 
-function normalizeCollection(collection) {
-  return Array.isArray(collection) ? collection.map(normalizeRecord) : [];
+// Key order does not matter: Postgres (jsonb) returns keys sorted differently than the browser built them.
+function stableJson(value) {
+  return JSON.stringify(sortKeys(value));
 }
 
-function normalizeRecord(record) {
-  if (!record || typeof record !== "object") return {};
-  const now = new Date().toISOString();
-  return {
-    createdAt: record.createdAt || now,
-    updatedAt: record.updatedAt || record.createdAt || now,
-    ...record
-  };
-}
-
-function normalizeProfiles(profiles) {
-  if (!profiles || typeof profiles !== "object" || Array.isArray(profiles)) return {};
-  return Object.entries(profiles).reduce((acc, [key, value]) => {
-    if (value && typeof value === "object" && !Array.isArray(value)) acc[key] = { ...value };
+function sortKeys(value) {
+  if (Array.isArray(value)) return value.map(sortKeys);
+  if (!value || typeof value !== "object") return value;
+  return Object.keys(value).sort().reduce((acc, key) => {
+    acc[key] = sortKeys(value[key]);
     return acc;
   }, {});
 }
 
-// Mirrors canWrite() in auth.js (not imported to avoid a circular dependency).
-function currentUserCanWrite() {
-  const user = state.users.find((item) => item.id === state.session?.userId);
-  if (!user) return false;
-  return user.role === "admin" || user.role === "finanzas" || Boolean(user.permissions?.includes("write"));
-}
-
-function applyCurrentUserProfile() {
-  const current = state.users.find((user) => user.id === state.session?.userId);
-  if (!current) return;
-  const username = String(current.username || "").toLowerCase();
-  const profile = state.userProfiles?.[current.username] || state.userProfiles?.[username] || state.userProfiles?.[current.id];
-  if (profile?.avatar !== undefined) current.avatar = profile.avatar;
-}
-
-function migrateClient(client) {
-  const statusMap = {
-    activo: "cliente_activo",
-    pendiente: "en_negociacion",
-    finalizado: "proyecto_finalizado"
-  };
-  return {
-    priority: "media",
-    firstContact: client.firstContact || client.startDate || "",
-    lastContact: client.lastContact || "",
-    observations: client.observations || "",
-    ...client,
-    status: statusMap[client.status] || client.status || "lead"
-  };
-}
-
-function migrateProject(project) {
-  const statusMap = {
-    pendiente: "planificacion",
-    en_progreso: "en_desarrollo",
-    revision: "en_revision",
-    entregado: "finalizado"
-  };
-  return {
-    paid: 0,
-    expenses: 0,
-    progress: 0,
-    responsible: "",
-    technologies: "",
-    links: "",
-    notes: "",
-    tasks: [],
-    ...project,
-    status: statusMap[project.status] || project.status || "planificacion"
-  };
-}
-
-function migrateInvoice(invoice) {
-  return {
-    projectId: "",
-    notes: "",
-    ...invoice,
-    status: invoice.status || "pendiente"
-  };
-}
-
-function migratePayment(payment) {
-  return {
-    invoiceId: "",
-    projectId: "",
-    notes: "",
-    ...payment,
-    status: payment.status || "pagado"
-  };
-}
-
-function migrateTask(task) {
-  return {
-    projectId: "",
-    checklist: [],
-    comments: "",
-    ...task,
-    status: task.status || "pendiente",
-    priority: task.priority || "media"
-  };
-}
-
-function migrateGoal(goal) {
-  return {
-    current: 0,
-    status: "en_progreso",
-    priority: "media",
-    ...goal
-  };
-}
-
-function migrateUser(user) {
-  const username = user.username || String(user.email || user.name || "usuario").split("@")[0].toLowerCase().replace(/[^a-z0-9._-]/g, ".");
-  const status = user.status === "active" ? "activo" : user.status;
-  return {
-    username,
-    status: "activo",
-    permissions: defaultPermissionsForRole(user.role),
-    avatar: "",
-    phone: "",
-    area: "",
-    notes: "",
-    ...user,
-    status: status || "activo"
-  };
-}
-
-function defaultPermissionsForRole(role) {
-  if (role === "admin") return ["clients", "finance", "projects", "reports", "settings", "write", "delete"];
-  if (role === "finanzas") return ["clients", "finance", "reports", "write"];
-  return ["reports"];
+function safeRemove(key) {
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    // ignore
+  }
 }

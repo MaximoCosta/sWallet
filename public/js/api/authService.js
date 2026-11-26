@@ -26,6 +26,11 @@ export const authService = {
     return payload.user;
   },
 
+  async updateProfile(input) {
+    const payload = await apiRequest("/auth/profile", { method: "POST", body: input });
+    return payload.user;
+  },
+
   async logout() {
     const refreshToken = getRefreshToken();
     try {
