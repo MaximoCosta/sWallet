@@ -110,6 +110,27 @@ const MIGRATIONS: { id: string; statements: () => string[] }[] = [
       `CREATE INDEX IF NOT EXISTS "movements_client_id_idx" ON "movements" ("client_id")`,
       `CREATE INDEX IF NOT EXISTS "movements_project_id_idx" ON "movements" ("project_id")`
     ]
+  },
+  {
+    // Files, screenshots and links attached to assigned tasks (files live in Storage, bucket "task-files").
+    id: "2026-11-task-attachments",
+    statements: () => [
+      `CREATE TABLE IF NOT EXISTS "assigned_task_attachments" (
+  "id" TEXT PRIMARY KEY,
+  "taskId" TEXT NOT NULL REFERENCES "assigned_tasks"("id") ON DELETE CASCADE,
+  "kind" TEXT NOT NULL CHECK ("kind" IN ('file', 'link')),
+  "name" TEXT NOT NULL,
+  "url" TEXT,
+  "storagePath" TEXT,
+  "mimeType" TEXT,
+  "size" BIGINT,
+  "uploadedBy" TEXT NOT NULL,
+  "uploadedByName" TEXT NOT NULL,
+  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+)`,
+      `CREATE INDEX IF NOT EXISTS "assigned_task_attachments_task_idx" ON "assigned_task_attachments" ("taskId")`,
+      `ALTER TABLE "assigned_task_attachments" ENABLE ROW LEVEL SECURITY`
+    ]
   }
 ];
 

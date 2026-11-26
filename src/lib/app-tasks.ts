@@ -6,6 +6,7 @@ import { randomUUID } from "crypto";
 import { prisma } from "@/lib/prisma";
 import { listAccounts } from "@/lib/supabase-auth";
 import { runMigrations } from "@/lib/migrations";
+import { createUploadUrl, fileExists, MAX_TASK_FILE_BYTES, removeFiles, safeFileName, signedLinks } from "@/lib/task-files";
 
 export const TASK_STATUSES = ["asignada", "en_proceso", "completada"] as const;
 export const TASK_PRIORITIES = ["baja", "media", "alta", "urgente"] as const;
@@ -29,6 +30,7 @@ type TaskRow = {
   startedAt: Date | null;
   completedAt: Date | null;
   commentCount?: number | bigint;
+  attachmentCount?: number | bigint;
 };
 
 type EventRow = {
@@ -71,10 +73,12 @@ export async function listTasks(actor: Actor) {
   await ensureTaskTables();
   const rows = actor.isManager
     ? await prisma.$queryRaw<TaskRow[]>`
-        SELECT t.*, (SELECT COUNT(*) FROM "assigned_task_events" e WHERE e."taskId" = t."id" AND e."kind" = 'comment') AS "commentCount"
+        SELECT t.*, (SELECT COUNT(*) FROM "assigned_task_events" e WHERE e."taskId" = t."id" AND e."kind" = 'comment') AS "commentCount",
+               (SELECT COUNT(*) FROM "assigned_task_attachments" a WHERE a."taskId" = t."id") AS "attachmentCount"
         FROM "assigned_tasks" t ORDER BY t."createdAt" DESC`
     : await prisma.$queryRaw<TaskRow[]>`
-        SELECT t.*, (SELECT COUNT(*) FROM "assigned_task_events" e WHERE e."taskId" = t."id" AND e."kind" = 'comment') AS "commentCount"
+        SELECT t.*, (SELECT COUNT(*) FROM "assigned_task_events" e WHERE e."taskId" = t."id" AND e."kind" = 'comment') AS "commentCount",
+               (SELECT COUNT(*) FROM "assigned_task_attachments" a WHERE a."taskId" = t."id") AS "attachmentCount"
         FROM "assigned_tasks" t WHERE t."assignee" = ${actor.id} ORDER BY t."createdAt" DESC`;
   const names = await accountNames();
   return rows.map((row) => toPublicTask(row, names));
@@ -91,7 +95,117 @@ export async function getTaskWithEvents(actor: Actor, id: string) {
   const events = await prisma.$queryRaw<EventRow[]>`
     SELECT * FROM "assigned_task_events" WHERE "taskId" = ${id} ORDER BY "createdAt" ASC
   `;
-  return { task: toPublicTask(task, await accountNames()), events: events.map(toPublicEvent) };
+  return { task: toPublicTask(task, await accountNames()), events: events.map(toPublicEvent), attachments: await listAttachments(actor, id) };
+}
+
+/* ---------- Attachments ---------- */
+
+const MAX_ATTACHMENTS = 40;
+
+type AttachmentRow = {
+  id: string;
+  kind: "file" | "link";
+  name: string;
+  url: string | null;
+  storagePath: string | null;
+  mimeType: string | null;
+  size: bigint | number | null;
+  uploadedBy: string;
+  uploadedByName: string;
+  createdAt: Date;
+};
+
+async function listAttachments(actor: Actor, taskId: string) {
+  const rows = await prisma.$queryRaw<AttachmentRow[]>`
+    SELECT * FROM "assigned_task_attachments" WHERE "taskId" = ${taskId} ORDER BY "createdAt" ASC
+  `;
+  const links = await signedLinks(rows.filter((row) => row.storagePath).map((row) => row.storagePath as string)).catch(() => new Map<string, string>());
+  return rows.map((row) => ({
+    id: row.id,
+    kind: row.kind,
+    name: row.name,
+    url: row.kind === "link" ? row.url : links.get(row.storagePath || "") || null,
+    mimeType: row.mimeType || "",
+    isImage: row.kind === "file" && /^image\//.test(row.mimeType || ""),
+    size: row.size === null ? null : Number(row.size),
+    uploadedBy: row.uploadedBy,
+    uploadedByName: row.uploadedByName,
+    createdAt: iso(row.createdAt),
+    canDelete: actor.isManager || row.uploadedBy === actor.id
+  }));
+}
+
+async function attachmentCount(taskId: string) {
+  const [{ count }] = await prisma.$queryRaw<{ count: bigint }[]>`SELECT COUNT(*) AS count FROM "assigned_task_attachments" WHERE "taskId" = ${taskId}`;
+  return Number(count);
+}
+
+/** Step 1 of a file upload: permission + limits, then a one-time upload URL for the browser. */
+export async function prepareAttachmentUpload(actor: Actor, taskId: string, input: Record<string, unknown>) {
+  await getVisibleTask(actor, taskId);
+  const size = Number(input.size);
+  if (!Number.isFinite(size) || size <= 0) throw new TaskError("El archivo está vacío.");
+  if (size > MAX_TASK_FILE_BYTES) throw new TaskError("El archivo supera los 25 MB.");
+  if ((await attachmentCount(taskId)) >= MAX_ATTACHMENTS) throw new TaskError(`Una tarea puede tener hasta ${MAX_ATTACHMENTS} adjuntos.`);
+  const path = `${taskId}/${randomUUID()}-${safeFileName(String(input.name || "archivo"))}`;
+  const upload = await createUploadUrl(path);
+  return { path, maxBytes: MAX_TASK_FILE_BYTES, ...upload };
+}
+
+/** Step 2 (files) or the only step (links): register the attachment. */
+export async function addAttachment(actor: Actor, taskId: string, input: Record<string, unknown>) {
+  await getVisibleTask(actor, taskId);
+  if ((await attachmentCount(taskId)) >= MAX_ATTACHMENTS) throw new TaskError(`Una tarea puede tener hasta ${MAX_ATTACHMENTS} adjuntos.`);
+  const id = randomUUID();
+  let name: string;
+
+  if (input.kind === "link") {
+    const url = cleanLink(input.url);
+    name = String(input.name || input.title || "").trim().slice(0, 160) || new URL(url).hostname.replace(/^www\./, "");
+    await prisma.$executeRaw`
+      INSERT INTO "assigned_task_attachments" ("id", "taskId", "kind", "name", "url", "uploadedBy", "uploadedByName")
+      VALUES (${id}, ${taskId}, 'link', ${name}, ${url}, ${actor.id}, ${actor.name || actor.email})
+    `;
+  } else {
+    const path = String(input.path || "");
+    if (!path.startsWith(`${taskId}/`) || path.includes("..")) throw new TaskError("Archivo inválido.");
+    if (!(await fileExists(path))) throw new TaskError("El archivo no terminó de subirse. Probá de nuevo.");
+    name = String(input.name || "archivo").trim().slice(0, 160) || "archivo";
+    const size = Math.min(Number(input.size) || 0, MAX_TASK_FILE_BYTES);
+    const mimeType = String(input.mimeType || input.type || "application/octet-stream").slice(0, 120);
+    await prisma.$executeRaw`
+      INSERT INTO "assigned_task_attachments" ("id", "taskId", "kind", "name", "storagePath", "mimeType", "size", "uploadedBy", "uploadedByName")
+      VALUES (${id}, ${taskId}, 'file', ${name}, ${path}, ${mimeType}, ${size}, ${actor.id}, ${actor.name || actor.email})
+    `;
+  }
+  await addEvent(taskId, actor, "attachment", name, null, null);
+  await prisma.$executeRaw`UPDATE "assigned_tasks" SET "updatedAt" = CURRENT_TIMESTAMP WHERE "id" = ${taskId}`;
+  return getTaskWithEvents(actor, taskId);
+}
+
+export async function removeAttachment(actor: Actor, taskId: string, attachmentId: string) {
+  await getVisibleTask(actor, taskId);
+  const [row] = await prisma.$queryRaw<AttachmentRow[]>`
+    SELECT * FROM "assigned_task_attachments" WHERE "id" = ${attachmentId} AND "taskId" = ${taskId} LIMIT 1
+  `;
+  if (!row) throw new TaskError("Adjunto no encontrado.", 404);
+  if (!actor.isManager && row.uploadedBy !== actor.id) throw new TaskError("Solo quien lo subió (o Maxi) puede quitar este adjunto.", 403);
+  await prisma.$executeRaw`DELETE FROM "assigned_task_attachments" WHERE "id" = ${attachmentId}`;
+  if (row.storagePath) await removeFiles([row.storagePath]);
+  await addEvent(taskId, actor, "attachment_removed", row.name, null, null);
+  return getTaskWithEvents(actor, taskId);
+}
+
+function cleanLink(value: unknown) {
+  let text = String(value ?? "").trim();
+  if (text && !/^[a-z][a-z0-9+.-]*:/i.test(text)) text = `https://${text}`;
+  try {
+    const url = new URL(text);
+    if (url.protocol !== "https:" && url.protocol !== "http:") throw new Error();
+    return url.toString().slice(0, 2000);
+  } catch {
+    throw new TaskError("El link no es válido.");
+  }
 }
 
 export async function createTask(actor: Actor, input: Record<string, unknown>) {
@@ -177,7 +291,11 @@ export async function updateTask(actor: Actor, id: string, input: Record<string,
 export async function deleteTask(actor: Actor, id: string) {
   assertManager(actor);
   await getVisibleTask(actor, id);
+  const files = await prisma.$queryRaw<{ storagePath: string }[]>`
+    SELECT "storagePath" FROM "assigned_task_attachments" WHERE "taskId" = ${id} AND "storagePath" IS NOT NULL
+  `;
   await prisma.$executeRaw`DELETE FROM "assigned_tasks" WHERE "id" = ${id}`;
+  await removeFiles(files.map((file) => file.storagePath));
 }
 
 export async function addComment(actor: Actor, id: string, input: Record<string, unknown>) {
@@ -275,7 +393,8 @@ function toPublicTask(row: TaskRow, names: Map<string, string> = new Map()) {
     updatedAt: iso(row.updatedAt),
     startedAt: iso(row.startedAt),
     completedAt: iso(row.completedAt),
-    commentCount: Number(row.commentCount ?? 0)
+    commentCount: Number(row.commentCount ?? 0),
+    attachmentCount: Number(row.attachmentCount ?? 0)
   };
 }
 

@@ -90,6 +90,23 @@ function keyHeaders(key: string, bearer?: string): Record<string, string> {
   return headers;
 }
 
+/** Storage / admin REST call with the service key (server only). */
+export function supabaseAdminFetch(path: string, init: { method?: string; headers?: Record<string, string>; body?: BodyInit | null } = {}) {
+  const { url } = config();
+  const key = serviceKey();
+  return fetch(`${url}${path}`, {
+    method: init.method || "GET",
+    headers: { ...keyHeaders(key), ...(init.headers || {}) },
+    body: init.body ?? undefined,
+    cache: "no-store"
+  });
+}
+
+/** Project URL and public (anon) key: safe for the browser; RLS and private buckets protect the data. */
+export function supabasePublicConfig() {
+  return config();
+}
+
 export function taskManagerEmails() {
   return (process.env.TASK_MANAGER_USERS || DEFAULT_TASK_MANAGERS.join(","))
     .split(",")

@@ -18,7 +18,7 @@ import {
   updateOwnProfile
 } from "@/lib/supabase-auth";
 import { applyBatch, clearActivity, DataError, readData, type Actor as DataActor } from "@/lib/data-store";
-import { addComment, createTask, deleteTask, getTaskWithEvents, listAssignees, listTasks, TaskError, updateTask } from "@/lib/app-tasks";
+import { addAttachment, addComment, createTask, deleteTask, getTaskWithEvents, listAssignees, listTasks, prepareAttachmentUpload, removeAttachment, TaskError, updateTask } from "@/lib/app-tasks";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -142,6 +142,12 @@ async function route(request: NextRequest, context: RouteContext) {
         return json({ ok: true });
       }
       if (id && sub === "comments" && method === "POST") return json(await addComment(actor, id, await readJson(request)), 201);
+      if (id && sub === "attachments" && method === "POST" && path.endsWith("/attachments/upload")) {
+        return json(await prepareAttachmentUpload(actor, id, await readJson(request)));
+      }
+      if (id && sub === "attachments" && method === "POST") return json(await addAttachment(actor, id, await readJson(request)), 201);
+      const attachmentId = path.split("/")[3];
+      if (id && sub === "attachments" && attachmentId && method === "DELETE") return json(await removeAttachment(actor, id, attachmentId));
     }
 
     if (path === "users" || path.startsWith("users/")) {

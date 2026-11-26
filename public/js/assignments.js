@@ -4,6 +4,8 @@ import { taskService } from "./api/taskService.js";
 import { currentUser, isAuthenticated } from "./auth.js";
 import { closeModal, openModal } from "./events.js";
 import { dom, escapeAttribute, escapeHTML, notify } from "./render.js";
+import { addLink, attachmentsMarkup, closeLightbox, filesFromClipboard, lightboxOpen, MAX_FILE_BYTES, openLightbox, removeAttachment, uploadFiles } from "./task-attachments.js";
+import { validateForm } from "./forms.js";
 
 const STATUSES = [
   { key: "asignada", label: "Asignadas", single: "Asignada", empty: "Nada pendiente de empezar." },
@@ -25,7 +27,7 @@ export const assignments = {
   lastLoadedAt: null,
   filters: { person: "", priority: "", due: "", term: "", hideDone: false },
   layout: readLayout(),
-  detail: { id: "", events: [], loading: false }
+  detail: { id: "", events: [], attachments: [], uploads: [], loading: false }
 };
 
 let pollTimer = null;
@@ -109,7 +111,7 @@ async function changeStatus(id, status) {
   try {
     const payload = await taskService.update(id, { status });
     replaceTask(payload.task);
-    if (assignments.detail.id === id) assignments.detail.events = payload.events || [];
+    if (assignments.detail.id === id) applyDetailPayload(payload);
     renderAssignments();
     notify(statusToastTitle(status), payload.task.title);
   } catch (error) {
@@ -292,8 +294,9 @@ function renderStats() {
 }
 
 function renderTeam() {
+  // A copy: people added below (accounts that no longer exist) must not become assignable.
   const people = assignments.assignees.length
-    ? assignments.assignees
+    ? [...assignments.assignees]
     : [...new Set(assignments.tasks.map((task) => task.assignee))].map((id) => ({ id, name: personName(id) }));
   // Include people who still have tasks but are no longer active accounts.
   assignments.tasks.forEach((task) => {
@@ -365,6 +368,7 @@ function cardMarkup(task, manager) {
         ${manager ? `<span class="task-assignee">${avatar(task.assignee)}${escapeHTML(personName(task.assignee))}</span>` : ""}
         <span class="${due.tone}"><svg aria-hidden="true"><use href="#i-clock"/></svg>${due.text}</span>
         ${task.commentCount ? `<span title="Comentarios"><svg aria-hidden="true"><use href="#i-comment"/></svg>${task.commentCount}</span>` : ""}
+        ${task.attachmentCount ? `<span title="Archivos y links"><svg aria-hidden="true"><use href="#i-clip"/></svg>${task.attachmentCount}</span>` : ""}
       </div>
       <div class="task-card-actions">${quickActions(task)}</div>
     </article>
@@ -449,20 +453,27 @@ function syncPersonOptions() {
 async function openDetail(id) {
   const task = assignments.tasks.find((item) => item.id === id);
   if (!task) return;
-  assignments.detail = { id, events: [], loading: true };
+  assignments.detail = { id, events: [], attachments: [], uploads: [], loading: true };
   renderDetail();
   openModal("assignmentDetailModal");
   try {
     const payload = await taskService.get(id);
     if (assignments.detail.id !== id) return;
     replaceTask(payload.task);
-    assignments.detail.events = payload.events || [];
+    applyDetailPayload(payload);
   } catch (error) {
     notify("No se pudo abrir la tarea", error.message);
   } finally {
     if (assignments.detail.id === id) assignments.detail.loading = false;
     renderAssignments();
   }
+}
+
+function applyDetailPayload(payload) {
+  if (!payload) return;
+  if (payload.task) replaceTask(payload.task);
+  if (Array.isArray(payload.events)) assignments.detail.events = payload.events;
+  if (Array.isArray(payload.attachments)) assignments.detail.attachments = payload.attachments;
 }
 
 function renderDetail() {
@@ -498,6 +509,8 @@ function renderDetail() {
     <div class="status-picker" role="group" aria-label="Cambiar estado">
       ${STATUSES.map((status) => `<button type="button" data-status="${status.key}" data-task-status="${status.key}" data-task-id="${escapeAttribute(task.id)}" aria-pressed="${task.status === status.key}"><i aria-hidden="true"></i>${status.single}</button>`).join("")}
     </div>
+    <p class="task-detail-section-title">Archivos y links${assignments.detail.attachments.length ? ` <span class="muted">(${assignments.detail.attachments.length})</span>` : ""}</p>
+    <div class="task-attachments">${assignments.detail.loading && !assignments.detail.attachments.length ? `<p class="muted">Cargando adjuntos...</p>` : attachmentsMarkup(assignments.detail.attachments, assignments.detail.uploads)}</div>
     <p class="task-detail-section-title">Actividad</p>
     <div class="timeline">${assignments.detail.loading && !assignments.detail.events.length ? `<p class="muted">Cargando actividad...</p>` : timelineMarkup(assignments.detail.events)}</div>
     <form class="task-comment-form" id="assignmentCommentForm" novalidate>
@@ -526,6 +539,12 @@ function timelineMarkup(events) {
     if (event.kind === "created") {
       text = "creó y asignó la tarea";
       icon = "i-plus";
+    } else if (event.kind === "attachment") {
+      text = `adjuntó <b>${escapeHTML(event.body)}</b>`;
+      icon = "i-clip";
+    } else if (event.kind === "attachment_removed") {
+      text = `quitó <b>${escapeHTML(event.body)}</b>`;
+      icon = "i-clip";
     } else if (event.kind === "status") {
       text = `cambió el estado de <b>${statusLabel(event.fromStatus)}</b> a <b>${statusLabel(event.toStatus)}</b>`;
       icon = "i-assign";
@@ -535,6 +554,54 @@ function timelineMarkup(events) {
     }
     return `<div class="timeline-item"><span class="timeline-dot"><svg aria-hidden="true"><use href="#${icon}"/></svg></span><div class="timeline-body">${who} ${text}${when}</div></div>`;
   }).join("");
+}
+
+async function startUpload(files) {
+  const id = assignments.detail.id;
+  if (!id || !files.length) return;
+  const payload = await uploadFiles(id, files, (uploads) => {
+    if (assignments.detail.id !== id) return;
+    assignments.detail.uploads = uploads;
+    renderDetail();
+  });
+  if (payload && assignments.detail.id === id) {
+    applyDetailPayload(payload);
+    renderAssignments();
+    notify("Adjunto agregado", files.length === 1 ? files[0].name : `${files.length} archivos`);
+  }
+}
+
+async function submitLink(event) {
+  event.preventDefault();
+  const form = event.target;
+  const url = form.elements.url.value.trim();
+  if (!url) {
+    form.elements.url.classList.add("field-error");
+    form.elements.url.focus();
+    return;
+  }
+  const button = form.querySelector("button[type='submit']");
+  button.disabled = true;
+  try {
+    applyDetailPayload(await addLink(assignments.detail.id, url, form.elements.name.value.trim()));
+    renderAssignments();
+    notify("Link agregado", url);
+  } catch (error) {
+    notify("No se pudo agregar el link", error.message);
+    button.disabled = false;
+  }
+}
+
+async function deleteAttachment(attachmentId) {
+  const item = assignments.detail.attachments.find((attachment) => attachment.id === attachmentId);
+  if (!item || !confirm(`¿Quitar "${item.name}" de la tarea?`)) return;
+  try {
+    applyDetailPayload(await removeAttachment(assignments.detail.id, attachmentId));
+    renderAssignments();
+    notify("Adjunto quitado", item.name);
+  } catch (error) {
+    notify("No se pudo quitar", error.message);
+  }
 }
 
 async function submitComment(event) {
@@ -552,7 +619,7 @@ async function submitComment(event) {
     const payload = await taskService.comment(id, text);
     input.value = "";
     replaceTask(payload.task);
-    assignments.detail.events = payload.events || [];
+    applyDetailPayload(payload);
     renderAssignments();
   } catch (error) {
     notify("No se pudo comentar", error.message);
@@ -563,54 +630,151 @@ async function submitComment(event) {
 
 /* ---------- Create / edit ---------- */
 
+// Files and links chosen in the form before the task exists; uploaded right after saving.
+let pendingAttachments = [];
+
 function openForm(task = null) {
   if (!canManage()) return;
   dom.assignmentForm.reset();
   dom.assignmentForm.querySelectorAll(".field-error").forEach((control) => control.classList.remove("field-error"));
+  dom.assignmentForm.querySelectorAll(".field-message").forEach((note) => note.remove());
   dom.assignmentId.value = task?.id || "";
   dom.assignmentFormTitle.textContent = task ? "Editar tarea" : "Nueva tarea";
   dom.assignmentSubmit.textContent = task ? "Guardar cambios" : "Asignar tarea";
-  dom.assignmentAssignee.innerHTML = `<option value="">Elegí una persona</option>${assignments.assignees.map((person) => `<option value="${escapeAttribute(person.id)}">${escapeHTML(person.name || person.email)}${person.id === me() ? " (vos)" : ""}</option>`).join("")}`;
+  // New task: pick one or many people. Existing task: it belongs to one person (reassign with the select).
+  dom.assignmentPeopleField.hidden = Boolean(task);
+  dom.assignmentAssigneeField.hidden = !task;
+  dom.assignmentAssignee.innerHTML = assignments.assignees.map((person) => `<option value="${escapeAttribute(person.id)}">${escapeHTML(person.name || person.email)}${person.id === me() ? " (vos)" : ""}</option>`).join("");
+  dom.assignmentPeople.innerHTML = assignments.assignees.map((person) => `
+    <label class="person-option"><input type="checkbox" value="${escapeAttribute(person.id)}"${!task && assignments.filters.person === person.id ? " checked" : ""}>
+      <span class="user-avatar" aria-hidden="true">${escapeHTML((person.name || person.email || "?").charAt(0).toUpperCase())}</span>
+      <span><strong>${escapeHTML(person.name || person.email)}${person.id === me() ? " (vos)" : ""}</strong><small>${escapeHTML(person.email || "")}</small></span>
+    </label>`).join("") || `<p class="muted">Todavía no hay personas con acceso. Dales acceso desde Equipo.</p>`;
   dom.assignmentTitle.value = task?.title || "";
   dom.assignmentDescription.value = task?.description || "";
-  dom.assignmentAssignee.value = task?.assignee || assignments.filters.person || "";
+  if (task) dom.assignmentAssignee.value = task.assignee;
   dom.assignmentPriority.value = task?.priority || "media";
   dom.assignmentDueDate.value = task?.dueDate || "";
+  pendingAttachments = [];
+  renderPendingAttachments();
+  syncPickCount();
   openModal("assignmentFormModal");
+}
+
+function selectedPeople() {
+  return [...dom.assignmentPeople.querySelectorAll("input[type=checkbox]:checked")].map((input) => input.value);
+}
+
+function syncPickCount() {
+  const count = selectedPeople().length;
+  dom.assignmentPickCount.textContent = count ? `${count} seleccionada${count === 1 ? "" : "s"}` : "";
+  dom.assignmentSubmit.textContent = dom.assignmentId.value ? "Guardar cambios" : count > 1 ? `Asignar a ${count} personas` : "Asignar tarea";
+}
+
+function renderPendingAttachments() {
+  const items = pendingAttachments.map((item) => ({
+    id: item.id,
+    kind: item.kind,
+    name: item.name,
+    url: item.kind === "link" ? item.url : "",
+    size: item.kind === "file" ? item.file.size : null,
+    isImage: false,
+    uploadedByName: item.kind === "file" ? "se sube al guardar" : "",
+    canDelete: true
+  }));
+  dom.assignmentFormAttachments.innerHTML = attachmentsMarkup(items, [], { prefix: "form", emptyText: "Podés sumar capturas, archivos o links ahora o después desde la tarea." });
+}
+
+function addPendingFiles(files) {
+  for (const file of files) {
+    if (file.size > MAX_FILE_BYTES) {
+      notify("Archivo muy grande", `${file.name} supera los 25 MB.`);
+      continue;
+    }
+    pendingAttachments.push({ id: `p-${Date.now()}-${Math.random()}`, kind: "file", file, name: file.name });
+  }
+  renderPendingAttachments();
+}
+
+function addPendingLink() {
+  const box = dom.assignmentFormAttachments;
+  const urlInput = box.querySelector("[data-link-url]");
+  const nameInput = box.querySelector("[data-link-name]");
+  let url = urlInput.value.trim();
+  if (!url) {
+    urlInput.classList.add("field-error");
+    urlInput.focus();
+    return;
+  }
+  if (!/^[a-z][a-z0-9+.-]*:/i.test(url)) url = `https://${url}`;
+  pendingAttachments.push({ id: `p-${Date.now()}`, kind: "link", url, name: nameInput.value.trim() || url.replace(/^https?:\/\/(www\.)?/, "").split("/")[0] });
+  renderPendingAttachments();
+}
+
+async function uploadPending(taskIds) {
+  if (!pendingAttachments.length) return;
+  const items = pendingAttachments;
+  pendingAttachments = [];
+  const files = items.filter((item) => item.kind === "file").map((item) => item.file);
+  const links = items.filter((item) => item.kind === "link");
+  notify("Subiendo adjuntos", `${items.length} adjunto(s)${taskIds.length > 1 ? ` a ${taskIds.length} tareas` : ""}...`);
+  for (const taskId of taskIds) {
+    for (const link of links) {
+      try {
+        await addLink(taskId, link.url, link.name);
+      } catch (error) {
+        notify("No se pudo agregar el link", error.message);
+      }
+    }
+    if (files.length) await uploadFiles(taskId, files);
+  }
+  await loadAssignments({ silent: true });
+  notify("Adjuntos listos", `${items.length} adjunto(s) agregado(s).`);
 }
 
 async function submitForm(event) {
   event.preventDefault();
-  const required = [dom.assignmentTitle, dom.assignmentAssignee];
-  required.forEach((control) => control.classList.toggle("field-error", !control.value.trim()));
-  if (dom.assignmentTitle.value.trim().length < 3) {
-    dom.assignmentTitle.classList.add("field-error");
-    notify("Falta el título", "Escribí un título de al menos 3 caracteres.");
-    return;
-  }
-  if (!dom.assignmentAssignee.value) {
-    notify("Falta el responsable", "Elegí a quién se asigna la tarea.");
-    return;
-  }
   const id = dom.assignmentId.value;
-  const input = {
+  const people = id ? [dom.assignmentAssignee.value] : selectedPeople();
+  const errors = [];
+  if (dom.assignmentTitle.value.trim().length < 3) errors.push([dom.assignmentTitle, "Escribí un título de al menos 3 caracteres."]);
+  if (!people.filter(Boolean).length) errors.push([dom.assignmentPeople.querySelector("input") || dom.assignmentPickAll, "Elegí al menos una persona."]);
+  if (!validateForm(dom.assignmentForm, errors)) return;
+
+  const base = {
     title: dom.assignmentTitle.value.trim(),
     description: dom.assignmentDescription.value.trim(),
-    assignee: dom.assignmentAssignee.value,
     priority: dom.assignmentPriority.value,
     dueDate: dom.assignmentDueDate.value
   };
   dom.assignmentSubmit.disabled = true;
   try {
-    const payload = id ? await taskService.update(id, input) : await taskService.create(input);
-    replaceTask(payload.task);
+    if (id) {
+      const payload = await taskService.update(id, { ...base, assignee: people[0] });
+      replaceTask(payload.task);
+      closeModal();
+      renderAssignments();
+      notify("Tarea actualizada", `${payload.task.title} · ${personName(payload.task.assignee)}`);
+      await uploadPending([id]);
+      if (assignments.detail.id === id) openDetail(id);
+      return;
+    }
+    // One task per person: each one tracks their own progress.
+    const created = [];
+    for (const person of people) {
+      try {
+        const payload = await taskService.create({ ...base, assignee: person });
+        replaceTask(payload.task);
+        created.push(payload.task);
+      } catch (error) {
+        notify("No se pudo asignar", `${personName(person)}: ${error.message}`);
+      }
+    }
+    if (!created.length) return;
     closeModal();
     renderAssignments();
-    notify(id ? "Tarea actualizada" : "Tarea asignada", `${payload.task.title} · ${personName(payload.task.assignee)}`);
-    if (id && assignments.detail.id === id) {
-      assignments.detail.events = payload.events || [];
-      openDetail(id);
-    }
+    notify(created.length > 1 ? `Tarea asignada a ${created.length} personas` : "Tarea asignada", created.length > 1 ? created.map((task) => personName(task.assignee)).join(", ") : `${created[0].title} · ${personName(created[0].assignee)}`);
+    await uploadPending(created.map((task) => task.id));
   } catch (error) {
     notify("No se pudo guardar la tarea", error.message);
   } finally {
@@ -624,7 +788,7 @@ async function removeTask(id) {
   try {
     await taskService.remove(id);
     assignments.tasks = assignments.tasks.filter((item) => item.id !== id);
-    assignments.detail = { id: "", events: [], loading: false };
+    assignments.detail = { id: "", events: [], attachments: [], uploads: [], loading: false };
     closeModal();
     renderAssignments();
     notify("Tarea eliminada", task.title);
@@ -665,6 +829,52 @@ function bindAssignmentEvents() {
   dom.assignmentRefresh?.addEventListener("click", () => loadAssignments().then(() => notify("Tareas", "Lista actualizada.")));
   dom.assignmentNew?.addEventListener("click", () => openForm());
   dom.assignmentForm?.addEventListener("submit", submitForm);
+  dom.assignmentPeople?.addEventListener("change", syncPickCount);
+  dom.assignmentPickAll?.addEventListener("click", () => {
+    dom.assignmentPeople.querySelectorAll("input[type=checkbox]").forEach((input) => {
+      input.checked = true;
+    });
+    syncPickCount();
+  });
+  dom.assignmentPickNone?.addEventListener("click", () => {
+    dom.assignmentPeople.querySelectorAll("input[type=checkbox]").forEach((input) => {
+      input.checked = false;
+    });
+    syncPickCount();
+  });
+  dom.assignmentFormAttachments?.addEventListener("change", (event) => {
+    if (event.target.matches("[data-attachment-input='form']") && event.target.files?.length) {
+      addPendingFiles([...event.target.files]);
+    }
+  });
+  dom.assignmentFormAttachments?.addEventListener("click", (event) => {
+    if (event.target.closest?.("[data-link-add]")) {
+      event.preventDefault();
+      addPendingLink();
+      return;
+    }
+    const remove = event.target.closest?.("[data-attachment-remove]");
+    if (remove) {
+      pendingAttachments = pendingAttachments.filter((item) => item.id !== remove.dataset.attachmentRemove);
+      renderPendingAttachments();
+    }
+  });
+  dom.assignmentFormAttachments?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && event.target.matches("[data-link-url], [data-link-name]")) {
+      event.preventDefault();
+      addPendingLink();
+    }
+  });
+  ["dragenter", "dragover"].forEach((type) => dom.assignmentFormModal?.addEventListener(type, (event) => {
+    if (!event.dataTransfer?.types?.includes("Files")) return;
+    event.preventDefault();
+    dom.assignmentFormAttachments.querySelector("[data-attachment-drop]")?.classList.add("is-over");
+  }));
+  dom.assignmentFormModal?.addEventListener("drop", (event) => {
+    if (!event.dataTransfer?.files?.length) return;
+    event.preventDefault();
+    addPendingFiles([...event.dataTransfer.files]);
+  });
 
   // One delegated handler for cards, quick actions, team filters, list rows and the detail modal.
   document.addEventListener("click", (event) => {
@@ -717,7 +927,58 @@ function bindAssignmentEvents() {
 
   dom.assignmentDetailBody?.addEventListener("submit", (event) => {
     if (event.target.id === "assignmentCommentForm") submitComment(event);
+    if (event.target.matches("[data-attachment-link-form='detail']")) submitLink(event);
   });
+  dom.assignmentDetailBody?.addEventListener("change", (event) => {
+    if (event.target.matches("[data-attachment-input='detail']") && event.target.files?.length) {
+      startUpload([...event.target.files]);
+      event.target.value = "";
+    }
+  });
+  dom.assignmentDetailBody?.addEventListener("click", (event) => {
+    const preview = event.target.closest?.("[data-attachment-preview]");
+    if (preview) {
+      openLightbox(preview.dataset.attachmentPreview, preview.dataset.attachmentName);
+      return;
+    }
+    const remove = event.target.closest?.("[data-attachment-remove]");
+    if (remove) deleteAttachment(remove.dataset.attachmentRemove);
+  });
+  ["dragenter", "dragover"].forEach((type) => dom.assignmentDetailModal?.addEventListener(type, (event) => {
+    if (!event.dataTransfer?.types?.includes("Files")) return;
+    event.preventDefault();
+    dom.assignmentDetailBody.querySelector("[data-attachment-drop]")?.classList.add("is-over");
+  }));
+  dom.assignmentDetailModal?.addEventListener("dragleave", (event) => {
+    if (event.target === dom.assignmentDetailModal) dom.assignmentDetailBody.querySelector("[data-attachment-drop]")?.classList.remove("is-over");
+  });
+  dom.assignmentDetailModal?.addEventListener("drop", (event) => {
+    if (!event.dataTransfer?.files?.length) return;
+    event.preventDefault();
+    startUpload([...event.dataTransfer.files]);
+  });
+  // Ctrl+V of a screenshot while the task is open attaches it (also from the comment box).
+  document.addEventListener("paste", (event) => {
+    if (dom.assignmentFormModal?.classList.contains("modal-open")) {
+      const files = filesFromClipboard(event);
+      if (!files.length) return;
+      event.preventDefault();
+      addPendingFiles(files);
+      notify("Captura agregada", "Se sube cuando guardes la tarea.");
+      return;
+    }
+    if (!dom.assignmentDetailModal?.classList.contains("modal-open") || !assignments.detail.id) return;
+    const files = filesFromClipboard(event);
+    if (!files.length) return;
+    event.preventDefault();
+    startUpload(files);
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && lightboxOpen()) {
+      event.stopImmediatePropagation();
+      closeLightbox();
+    }
+  }, true);
   dom.assignmentDetailBody?.addEventListener("keydown", (event) => {
     if (event.target.id === "assignmentCommentInput" && event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
       event.preventDefault();
