@@ -1543,7 +1543,12 @@ input[type="date"] {
 .form-row {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    align-items: start;
     gap: 14px;
+}
+
+.data-form label {
+    align-content: start;
 }
 
 .form-hint {
@@ -1559,6 +1564,205 @@ input[type="date"] {
     color: var(--danger);
     font-size: 13px;
     font-weight: 500;
+}
+
+/* Form sections, hints, errors and previews */
+.form-section {
+    display: grid;
+    gap: 12px;
+    min-width: 0;
+    margin: 0;
+    padding: 0 0 14px;
+    border: 0;
+    border-bottom: 1px solid var(--border);
+}
+
+.form-section:last-of-type {
+    padding-bottom: 0;
+    border-bottom: 0;
+}
+
+.form-section > legend {
+    margin-bottom: 4px;
+    padding: 0;
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 650;
+}
+
+details.form-section > summary {
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 650;
+    cursor: pointer;
+    list-style: none;
+}
+
+details.form-section > summary::before {
+    content: "+ ";
+    color: var(--accent-text);
+}
+
+details.form-section[open] > summary::before {
+    content: "− ";
+}
+
+details.form-section[open] > summary {
+    margin-bottom: 4px;
+}
+
+.field-message {
+    color: var(--danger);
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.required-mark {
+    color: var(--accent-text);
+}
+
+.date-shortcuts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: -4px;
+}
+
+.date-shortcuts button {
+    min-height: 26px;
+    padding: 0 9px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.date-shortcuts button:hover {
+    border-color: var(--accent);
+    color: var(--text);
+}
+
+.form-preview {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+    gap: 10px;
+    padding: 12px 14px;
+    border-radius: var(--radius-sm);
+    background: var(--accent-soft);
+}
+
+.form-preview:empty {
+    display: none;
+}
+
+.form-preview div {
+    min-width: 0;
+}
+
+.form-preview span {
+    display: block;
+    color: var(--text-muted);
+    font-size: 12px;
+}
+
+.form-preview strong {
+    font-size: 15px;
+    font-variant-numeric: tabular-nums;
+}
+
+.form-preview .warn {
+    grid-column: 1 / -1;
+    color: var(--warning);
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.check-line {
+    display: flex !important;
+    align-items: center;
+    gap: 8px !important;
+    color: var(--text-muted);
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.range-row {
+    display: grid;
+    grid-template-columns: 1fr 80px;
+    align-items: center;
+    gap: 10px;
+}
+
+.range-row input[type="range"] {
+    min-height: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    accent-color: var(--accent);
+}
+
+/* Budget items editor */
+.items-editor {
+    display: grid;
+    gap: 8px;
+}
+
+.items-head,
+.item-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 76px 120px 110px 34px;
+    align-items: center;
+    gap: 8px;
+}
+
+.items-head {
+    color: var(--text-subtle);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.item-row input {
+    min-height: 36px;
+}
+
+.item-row .item-amount {
+    font-size: 13px;
+    font-weight: 600;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+.item-row .icon-button {
+    width: 34px;
+    height: 34px;
+}
+
+.items-actions {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+@media (max-width: 680px) {
+    .items-head {
+        display: none;
+    }
+
+    .item-row {
+        grid-template-columns: 72px minmax(0, 1fr) 34px;
+        padding-bottom: 8px;
+        border-bottom: 1px solid var(--border);
+    }
+
+    .item-row input:first-child {
+        grid-column: 1 / -1;
+    }
+
+    .item-row .item-amount {
+        display: none;
+    }
 }
 
 .segmented-control {

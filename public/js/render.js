@@ -1,6 +1,8 @@
 import { canDelete, canWrite, currentUser, isAdmin, isAuthenticated } from "./auth.js";
 import { accounts, loadAccounts } from "./accounts.js";
 import { renderAssignments } from "./assignments.js";
+import { budgetValidityDays, invoiceDueDays, loadBudgetItems, mainCurrency, nextInvoiceNumber, refreshSuggestions, resetExtra, syncAllDay } from "./form-fields.js";
+import { clearFieldErrors } from "./forms.js";
 import {
   actions,
   billingSummaryByClient,
@@ -164,6 +166,7 @@ export function renderAll() {
   renderClientPortal();
   renderSettings();
   renderAssignments();
+  refreshSuggestions();
   renderReports();
   drawAllCharts();
   applyCompanyTheme();
@@ -801,18 +804,40 @@ function dataIntegrityIssues() {
 }
 
 function syncCompanySettingsForm() {
-  if (!dom.companySettingsForm) return;
+  const form = dom.companySettingsForm;
+  if (!form) return;
+  // Do not overwrite what someone is typing (renders also happen when others save).
+  if (form.dataset.dirty || form.contains(document.activeElement)) return;
+  if (!form.dataset.watch) {
+    form.dataset.watch = "1";
+    form.addEventListener("input", () => {
+      form.dataset.dirty = "1";
+    });
+  }
   const settings = state.companySettings;
-  dom.companyName.value = settings.name || "";
-  dom.companyLegalName.value = settings.legalName || "";
-  dom.companyEmail.value = settings.email || "";
-  dom.companyWebsite.value = settings.website || "";
-  dom.companyPrimaryColor.value = settings.primaryColor || "#9f5cff";
-  dom.companyMainCurrency.value = settings.mainCurrency || "ARS";
-  dom.companySecondaryCurrency.value = settings.secondaryCurrency || "USD";
-  dom.companyReminderDays.value = settings.reminderDays || 5;
-  dom.companyServices.value = settings.services || "";
-  dom.companyFinanceCategories.value = settings.financeCategories || "";
+  const set = (id, value) => {
+    if (dom[id]) dom[id].value = value ?? "";
+  };
+  set("companyName", settings.name);
+  set("companyLegalName", settings.legalName);
+  set("companyTaxId", settings.taxId);
+  set("companyTaxCondition", settings.taxCondition);
+  set("companyEmail", settings.email);
+  set("companyPhone", settings.phone);
+  set("companyWebsite", settings.website);
+  set("companyAddress", settings.address);
+  set("companyInvoicePrefix", settings.invoicePrefix || "F-");
+  set("companyBudgetPrefix", settings.budgetPrefix || "P-");
+  set("companyBudgetValidity", settings.budgetValidity || 15);
+  set("companyInvoiceDueDays", settings.invoiceDueDays ?? 10);
+  set("companyPaymentTerms", settings.paymentTerms);
+  set("companyBankInfo", settings.bankInfo);
+  set("companyPrimaryColor", settings.primaryColor || "#9f5cff");
+  set("companyMainCurrency", settings.mainCurrency || "ARS");
+  set("companySecondaryCurrency", settings.secondaryCurrency || "USD");
+  set("companyReminderDays", settings.reminderDays || 5);
+  set("companyServices", settings.services);
+  set("companyFinanceCategories", settings.financeCategories);
 }
 
 function applyCompanyTheme() {
@@ -872,7 +897,7 @@ function renderInvoices() {
   const invoiceRows = filteredInvoices();
   dom.invoicesTable.innerHTML = invoiceRows.length ? invoiceRows.map((invoice) => `
     <tr>
-      <td>${escapeHTML(invoice.number)}</td>
+      <td><div class="entity-title"><strong>${escapeHTML(invoice.number)}</strong><span>${escapeHTML(invoice.concept || (invoice.type && invoice.type.length === 1 ? `Factura ${invoice.type}` : ""))}</span></div></td>
       <td>${escapeHTML(getClient(invoice.clientId)?.company || "Cliente eliminado")}</td>
       <td>${escapeHTML(getProject(invoice.projectId)?.name || "General")}</td>
       <td>${formatMoney(invoice.amount, invoice.currency)}</td>
@@ -913,11 +938,11 @@ function renderMovements() {
   const rows = movements().sort((a, b) => parseDate(b.date) - parseDate(a.date));
   dom.movementsTable.innerHTML = rows.length ? rows.map((item) => `
     <tr>
-      <td><span class="badge ${item.type}">${item.type}</span></td>
-      <td>${escapeHTML(item.category)}</td>
+      <td><span class="badge ${item.type}">${item.type === "salida" ? "Gasto" : "Ingreso"}</span></td>
+      <td><div class="entity-title"><strong>${escapeHTML(item.category)}</strong><span>${escapeHTML([item.method, item.recurring ? "Mensual" : ""].filter(Boolean).join(" · "))}</span></div></td>
       <td class="${item.type === "salida" ? "amount-negative" : "amount-positive"}">${item.type === "salida" ? "-" : "+"}${formatMoney(item.amount, item.currency)}</td>
       <td>${formatDate(item.date)}</td>
-      <td>${escapeHTML(item.description)}</td>
+      <td><div class="entity-title"><strong>${escapeHTML(item.description)}</strong><span>${escapeHTML([getProject(item.projectId)?.name, getClient(item.clientId)?.company].filter(Boolean).join(" · "))}</span></div></td>
       <td>
         <div class="actions-cell">
           <button class="ghost-button compact write-action" type="button" onclick="editMovement('${item.id}')">Editar</button>
@@ -1129,7 +1154,7 @@ function renderClientPortal() {
     .filter((event) => event.clientId === client.id && event.date && parseDate(event.date) >= new Date(Date.now() - DAY_MS))
     .sort((a, b) => parseDate(a.date) - parseDate(b.date))
     .slice(0, 5);
-  const files = documents().filter((doc) => doc.clientId === client.id).concat(clientPortalItems().filter((item) => item.clientId === client.id));
+  const files = documents().filter((doc) => doc.clientId === client.id && doc.visibleToClient !== false).concat(clientPortalItems().filter((item) => item.clientId === client.id));
   const pendingAmount = clientInvoices.reduce((total, invoice) => total + Math.max(Number(invoice.amount || 0) - paidForInvoice(invoice.id), 0), 0);
   const billedAmount = clientInvoices.reduce((total, invoice) => total + Number(invoice.amount || 0), 0);
   const paidAmount = clientPayments.reduce((total, payment) => total + Number(payment.amount || 0), 0);
@@ -1332,6 +1357,12 @@ function populateClientSelects() {
     if ([...dom[id].options].some((option) => option.value === value)) dom[id].value = value;
   });
 
+  if (dom.movementClient) {
+    const value = dom.movementClient.value;
+    dom.movementClient.innerHTML = [`<option value="">Sin cliente</option>`].concat(clients().map((client) => `<option value="${client.id}">${escapeHTML(client.company)} - ${escapeHTML(client.name)}</option>`)).join("");
+    if ([...dom.movementClient.options].some((option) => option.value === value)) dom.movementClient.value = value;
+  }
+
   if (dom.budgetClient) {
     const value = dom.budgetClient.value;
     dom.budgetClient.innerHTML = [`<option value="">Sin asociar</option>`].concat(clients().map((client) => `<option value="${client.id}">${escapeHTML(client.company)} - ${escapeHTML(client.name)}</option>`)).join("");
@@ -1373,7 +1404,9 @@ function populateProjectSelects() {
 
   if (dom.paymentProject) {
     const value = dom.paymentProject.value;
-    dom.paymentProject.innerHTML = [`<option value="">Sin proyecto</option>`].concat(projects().map((project) => `<option value="${project.id}">${escapeHTML(project.name)}</option>`)).join("");
+    const paymentClientId = dom.paymentClient?.value;
+    const paymentProjects = paymentClientId ? projects().filter((project) => project.clientId === paymentClientId) : projects();
+    dom.paymentProject.innerHTML = [`<option value="">Sin proyecto</option>`].concat(paymentProjects.map((project) => `<option value="${project.id}">${escapeHTML(project.name)}</option>`)).join("");
     if ([...dom.paymentProject.options].some((option) => option.value === value)) dom.paymentProject.value = value;
   }
 
@@ -1385,7 +1418,8 @@ function populateProjectSelects() {
     ["budgetProject", dom.budgetClient?.value],
     ["calendarEventProject", dom.calendarEventClient?.value],
     ["documentProject", dom.documentClient?.value],
-    ["supportProject", dom.supportClient?.value]
+    ["supportProject", dom.supportClient?.value],
+    ["movementProject", dom.movementClient?.value]
   ].forEach(([id, clientId]) => {
     if (!dom[id]) return;
     const value = dom[id].value;
@@ -1395,48 +1429,61 @@ function populateProjectSelects() {
   });
 }
 
+function prepareForm(form, extraKey) {
+  if (!form) return false;
+  form.reset();
+  clearFieldErrors(form);
+  if (extraKey) resetExtra(extraKey);
+  form.querySelectorAll("select[data-currency], select[id$='Currency']").forEach((select) => {
+    if ([...select.options].some((option) => option.value === mainCurrency())) select.value = mainCurrency();
+  });
+  return true;
+}
+
 export function resetPaymentForm() {
-  dom.paymentForm.reset();
+  prepareForm(dom.paymentForm, "payment");
   dom.paymentId.value = "";
   dom.paymentDate.value = toInputDate(new Date());
-  dom.paymentDueDate.value = toInputDate(new Date(Date.now() + 7 * DAY_MS));
+  dom.paymentDueDate.value = toInputDate(new Date());
   dom.paymentFormTitle.textContent = "Registrar pago";
 }
 
 export function resetProjectForm() {
-  dom.projectForm.reset();
+  prepareForm(dom.projectForm, "project");
   dom.projectId.value = "";
   dom.projectProgress.value = 0;
+  if (dom.projectProgressRange) dom.projectProgressRange.value = 0;
   dom.projectDueDate.value = toInputDate(new Date(Date.now() + 21 * DAY_MS));
   dom.projectStartDate.value = toInputDate(new Date());
   dom.projectFormTitle.textContent = "Crear proyecto";
 }
 
 export function resetInvoiceForm() {
-  dom.invoiceForm.reset();
+  prepareForm(dom.invoiceForm, "invoice");
   dom.invoiceId.value = "";
+  dom.invoiceNumber.value = nextInvoiceNumber();
   dom.invoiceIssueDate.value = toInputDate(new Date());
-  dom.invoiceDueDate.value = toInputDate(new Date(Date.now() + 10 * DAY_MS));
+  dom.invoiceDueDate.value = toInputDate(new Date(Date.now() + invoiceDueDays() * DAY_MS));
   dom.invoiceFormTitle.textContent = "Crear factura";
   populateProjectSelects();
 }
 
 export function resetMovementForm() {
-  dom.movementForm.reset();
+  prepareForm(dom.movementForm, "movement");
   dom.movementId.value = "";
   dom.movementDate.value = toInputDate(new Date());
   dom.movementFormTitle.textContent = "Registrar movimiento";
 }
 
 export function resetSubscriptionForm() {
-  dom.subscriptionForm.reset();
+  prepareForm(dom.subscriptionForm, "subscription");
   dom.subscriptionId.value = "";
   dom.subscriptionRenewal.value = toInputDate(new Date(Date.now() + 30 * DAY_MS));
   dom.subscriptionFormTitle.textContent = "Nueva suscripción";
 }
 
 export function resetClientForm() {
-  dom.clientForm.reset();
+  prepareForm(dom.clientForm, "client");
   dom.clientId.value = "";
   dom.clientFirstContact.value = toInputDate(new Date());
   dom.clientLastContact.value = toInputDate(new Date());
@@ -1444,24 +1491,23 @@ export function resetClientForm() {
 }
 
 export function resetTaskForm() {
-  dom.taskForm?.reset();
-  if (!dom.taskForm) return;
+  if (!prepareForm(dom.taskForm, "task")) return;
   dom.taskId.value = "";
+  dom.taskStartDate.value = toInputDate(new Date());
   dom.taskDueDate.value = toInputDate(new Date(Date.now() + 7 * DAY_MS));
   dom.taskFormTitle.textContent = "Nueva tarea";
 }
 
 export function resetGoalForm() {
-  dom.goalForm?.reset();
-  if (!dom.goalForm) return;
+  if (!prepareForm(dom.goalForm, "goal")) return;
   dom.goalId.value = "";
+  dom.goalStartDate.value = toInputDate(new Date());
   dom.goalDueDate.value = toInputDate(new Date(Date.now() + 30 * DAY_MS));
   dom.goalFormTitle.textContent = "Nueva meta";
 }
 
 export function resetRequestForm() {
-  dom.requestForm?.reset();
-  if (!dom.requestForm) return;
+  if (!prepareForm(dom.requestForm, "request")) return;
   dom.requestId.value = "";
   dom.requestDate.value = toInputDate(new Date());
   dom.requestDueDate.value = toInputDate(new Date(Date.now() + 7 * DAY_MS));
@@ -1469,37 +1515,34 @@ export function resetRequestForm() {
 }
 
 export function resetNoteForm() {
-  dom.noteForm?.reset();
-  if (!dom.noteForm) return;
+  if (!prepareForm(dom.noteForm, "note")) return;
   dom.noteId.value = "";
+  dom.noteDate.value = toInputDate(new Date());
   dom.noteFormTitle.textContent = "Nota interna";
 }
 
 export function resetActionForm() {
-  dom.actionForm?.reset();
-  if (!dom.actionForm) return;
+  if (!prepareForm(dom.actionForm, "action")) return;
   dom.actionId.value = "";
   dom.actionDueDate.value = toInputDate(new Date(Date.now() + 3 * DAY_MS));
   dom.actionFormTitle.textContent = "Nueva acción";
 }
 
 export function resetOpportunityForm() {
-  dom.opportunityForm?.reset();
-  if (!dom.opportunityForm) return;
+  if (!prepareForm(dom.opportunityForm, "opportunity")) return;
   dom.opportunityId.value = "";
-  dom.opportunityCurrency.value = "ARS";
   dom.opportunityProbability.value = 50;
   dom.opportunityFormTitle.textContent = "Nueva oportunidad";
 }
 
 export function resetBudgetForm() {
-  dom.budgetForm?.reset();
-  if (!dom.budgetForm) return;
+  if (!prepareForm(dom.budgetForm, "budget")) return;
   dom.budgetId.value = "";
   if (dom.budgetNumber) dom.budgetNumber.value = "";
-  dom.budgetCurrency.value = "ARS";
   if (dom.budgetIssueDate) dom.budgetIssueDate.value = toInputDate(new Date());
-  dom.budgetValidUntil.value = toInputDate(new Date(Date.now() + 10 * DAY_MS));
+  dom.budgetValidUntil.value = toInputDate(new Date(Date.now() + budgetValidityDays() * DAY_MS));
+  dom.budgetPaymentTerms.value = state.companySettings?.paymentTerms || "";
+  loadBudgetItems("");
   dom.budgetDiscount.value = 0;
   if (dom.budgetTaxes) dom.budgetTaxes.value = 0;
   dom.budgetStatus.value = "borrador";
@@ -1507,34 +1550,33 @@ export function resetBudgetForm() {
 }
 
 export function resetCalendarEventForm() {
-  dom.calendarEventForm?.reset();
-  if (!dom.calendarEventForm) return;
+  if (!prepareForm(dom.calendarEventForm, "calendarEvent")) return;
   dom.calendarEventId.value = "";
   dom.calendarEventDate.value = toInputDate(new Date());
   dom.calendarEventStart.value = "10:00";
   dom.calendarEventEnd.value = "10:30";
+  syncAllDay();
   dom.calendarEventFormTitle.textContent = "Nuevo evento";
 }
 
 export function resetDocumentForm() {
-  dom.documentForm?.reset();
-  if (!dom.documentForm) return;
+  if (!prepareForm(dom.documentForm, "document")) return;
   dom.documentId.value = "";
+  dom.documentDate.value = toInputDate(new Date());
   dom.documentFormTitle.textContent = "Nuevo documento";
 }
 
 export function resetSupportForm() {
-  dom.supportForm?.reset();
-  if (!dom.supportForm) return;
+  if (!prepareForm(dom.supportForm, "support")) return;
   dom.supportId.value = "";
+  dom.supportStartDate.value = toInputDate(new Date());
   dom.supportDomainRenewal.value = toInputDate(new Date(Date.now() + 30 * DAY_MS));
   dom.supportHostingRenewal.value = toInputDate(new Date(Date.now() + 30 * DAY_MS));
   dom.supportFormTitle.textContent = "Nuevo mantenimiento";
 }
 
 export function resetTeamForm() {
-  dom.teamForm?.reset();
-  if (!dom.teamForm) return;
+  if (!prepareForm(dom.teamForm, "team")) return;
   dom.teamId.value = "";
   dom.teamFormTitle.textContent = "Nuevo miembro";
   syncTeamAccessFields();
@@ -1566,9 +1608,9 @@ export function syncTeamAccessFields({ grant = false } = {}) {
 }
 
 export function resetMarketingForm() {
-  dom.marketingForm?.reset();
-  if (!dom.marketingForm) return;
+  if (!prepareForm(dom.marketingForm, "marketing")) return;
   dom.marketingId.value = "";
+  dom.marketingDate.value = toInputDate(new Date());
   dom.marketingDate.value = toInputDate(new Date());
   dom.marketingFormTitle.textContent = "Nueva campana";
 }

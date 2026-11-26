@@ -242,7 +242,11 @@ export function projectFinancials(projectId) {
     .reduce((total, payment) => total + toARS(payment.amount, payment.currency), 0);
   const manualPaid = toARS(project.paid || 0, project.currency || "ARS");
   const budget = toARS(project.budget || 0, project.currency || "ARS");
-  const expenses = toARS(project.expenses || 0, project.currency || "ARS");
+  // Manual expenses on the project plus expenses registered in Movimientos linked to it.
+  const linkedExpenses = movements()
+    .filter((movement) => movement.projectId === projectId && movement.type === "salida")
+    .reduce((total, movement) => total + toARS(movement.amount, movement.currency), 0);
+  const expenses = toARS(project.expenses || 0, project.currency || "ARS") + linkedExpenses;
   const collected = Math.max(paid, manualPaid);
   return {
     budget,
@@ -297,6 +301,10 @@ export function notifications() {
   });
 
   clients().forEach((client) => {
+    if (client.nextFollowUp && startOfDay(parseDate(client.nextFollowUp)) <= soon) {
+      rows.push({ type: "Seguimiento", tone: startOfDay(parseDate(client.nextFollowUp)) < today ? "vencida" : "pendiente", title: client.company, detail: "Fecha de seguimiento comercial", date: client.nextFollowUp });
+      return;
+    }
     if (client.lastContact && Math.floor((Date.now() - parseDate(client.lastContact).getTime()) / DAY_MS) > 21) {
       rows.push({ type: "Sin contacto", tone: "neutral", title: client.company, detail: "Seguimiento comercial recomendado", date: client.lastContact });
     }

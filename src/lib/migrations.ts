@@ -100,6 +100,16 @@ const MIGRATIONS: { id: string; statements: () => string[] }[] = [
       ...["data_deletions", "app_settings", "audit_log", "assigned_tasks", "assigned_task_events", "AppMigration"]
         .map((table) => `ALTER TABLE "${table}" ENABLE ROW LEVEL SECURITY`)
     ]
+  },
+  {
+    // Movements can be linked to a client and a project (expenses count against the project).
+    id: "2026-11-movement-links",
+    statements: () => [
+      `ALTER TABLE "movements" ADD COLUMN IF NOT EXISTS "client_id" TEXT REFERENCES "clients"("id") ON DELETE RESTRICT`,
+      `ALTER TABLE "movements" ADD COLUMN IF NOT EXISTS "project_id" TEXT REFERENCES "projects"("id") ON DELETE RESTRICT`,
+      `CREATE INDEX IF NOT EXISTS "movements_client_id_idx" ON "movements" ("client_id")`,
+      `CREATE INDEX IF NOT EXISTS "movements_project_id_idx" ON "movements" ("project_id")`
+    ]
   }
 ];
 

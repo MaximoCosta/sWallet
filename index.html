@@ -356,38 +356,7 @@
                                 <h2 id="clientFormTitle">Crear cliente</h2>
                             </div>
                         </div>
-                        <form id="clientForm" class="data-form" novalidate>
-                            <input type="hidden" id="clientId">
-                            <div class="form-row">
-                                <label>Nombre del cliente<input id="clientName" required type="text" placeholder="Ej: Ana Perez"></label>
-                                <label>Empresa o negocio<input id="clientCompany" required type="text" placeholder="Ej: Bloom Studio"></label>
-                            </div>
-                            <div class="form-row">
-                                <label>Email<input id="clientEmail" required type="email" placeholder="cliente@empresa.com"></label>
-                                <label>Teléfono<input id="clientPhone" required type="tel" placeholder="+54 9 11 0000 0000"></label>
-                            </div>
-                            <div class="form-row">
-                                <label>Dirección<input id="clientAddress" type="text" placeholder="Ciudad, pais"></label>
-                                <label>Redes sociales<input id="clientSocials" type="text" placeholder="@cliente / LinkedIn"></label>
-                                <label>Sitio web<input id="clientWebsite" type="url" placeholder="https://"></label>
-                            </div>
-                            <label>Servicio contratado<input id="clientService" required type="text" placeholder="Sitio web, soporte, branding..."></label>
-                            <div class="form-row">
-                                <label>Monto acordado<input id="clientAmount" required min="1" step="0.01" type="number"></label>
-                                <label>Moneda<select id="clientCurrency" required><option value="ARS">ARS</option><option value="USD">USD</option></select></label>
-                                <label>Estado<select id="clientStatus" required><option value="lead">Lead</option><option value="contactado">Contactado</option><option value="presupuesto_enviado">Presupuesto enviado</option><option value="en_negociacion">En negociación</option><option value="cliente_activo">Cliente activo</option><option value="esperando_respuesta">Esperando respuesta</option><option value="proyecto_finalizado">Proyecto finalizado</option><option value="perdido">Perdido</option></select></label>
-                                <label>Prioridad<select id="clientPriority" required><option value="baja">Baja</option><option value="media">Media</option><option value="alta">Alta</option><option value="urgente">Urgente</option></select></label>
-                            </div>
-                            <div class="form-row">
-                                <label>Primer contacto<input id="clientFirstContact" type="date"></label>
-                                <label>Último contacto<input id="clientLastContact" type="date"></label>
-                            </div>
-                            <label>Notas internas<textarea id="clientObservations" rows="3" placeholder="Riesgos, oportunidades, acuerdos, contexto..."></textarea></label>
-                            <div class="form-actions">
-                                <button class="ghost-button" id="cancelClientEdit" type="button">Cancelar</button>
-                                <button class="primary-button" type="submit">Guardar cliente</button>
-                            </div>
-                        </form>
+                        <form id="clientForm" class="data-form" novalidate><input type="hidden" id="clientId"><fieldset class="form-section"><legend>Contacto</legend><div class="form-row"><label>Nombre y apellido<input id="clientName" required type="text" maxlength="120" placeholder="Ej: Ana Pérez" autocomplete="off"></label><label>Empresa o marca<input id="clientCompany" required type="text" maxlength="120" placeholder="Ej: Bloom Studio"></label></div><div class="form-row"><label>Email<input id="clientEmail" type="email" data-one-of="clientPhone" placeholder="cliente@empresa.com"></label><label>Teléfono / WhatsApp<input id="clientPhone" type="tel" placeholder="+54 9 11 0000 0000"></label></div><p class="form-hint">Con email o teléfono alcanza.</p><div class="form-row"><label>Sitio web<input id="clientWebsite" type="url" placeholder="empresa.com"></label><label>Redes sociales<input id="clientSocials" type="text" placeholder="@cliente / LinkedIn"></label><label>Ciudad / dirección<input id="clientAddress" type="text" placeholder="Córdoba, AR"></label></div></fieldset><details class="form-section"><summary>Datos fiscales</summary><div class="form-row"><label>CUIT / CUIL / DNI<input id="clientTaxId" type="text" maxlength="20" placeholder="30-12345678-9"></label><label>Condición frente al IVA<select id="clientTaxCondition"><option value="">Sin definir</option><option value="responsable_inscripto">Responsable inscripto</option><option value="monotributo">Monotributo</option><option value="exento">Exento</option><option value="consumidor_final">Consumidor final</option><option value="exterior">Cliente del exterior</option></select></label><label>Rubro<input id="clientIndustry" type="text" list="dlIndustries" placeholder="Gastronomía, salud..."></label></div></details><fieldset class="form-section"><legend>Comercial</legend><div class="form-row"><label>Servicio<input id="clientService" required type="text" list="dlServices" placeholder="Sitio web, mantenimiento..."></label><label>Modalidad<select id="clientServiceType"><option value="proyecto">Proyecto único</option><option value="mensual">Mensual / recurrente</option><option value="horas">Por horas</option></select></label></div><div class="form-row"><label>Monto acordado<input id="clientAmount" min="0" step="0.01" type="number" inputmode="decimal" placeholder="0"></label><label>Moneda<select id="clientCurrency" required><option value="ARS">ARS</option><option value="USD">USD</option></select></label><label>Estado<select id="clientStatus" required><option value="lead">Lead</option><option value="contactado">Contactado</option><option value="presupuesto_enviado">Presupuesto enviado</option><option value="en_negociacion">En negociación</option><option value="cliente_activo">Cliente activo</option><option value="esperando_respuesta">Esperando respuesta</option><option value="proyecto_finalizado">Proyecto finalizado</option><option value="perdido">Perdido</option></select></label><label>Prioridad<select id="clientPriority" required><option value="baja">Baja</option><option value="media" selected>Media</option><option value="alta">Alta</option><option value="urgente">Urgente</option></select></label></div><div class="form-row"><label>Cómo llegó<select id="clientSource"><option value="">Sin dato</option><option value="referido">Referido</option><option value="web">Sitio web</option><option value="instagram">Instagram</option><option value="linkedin">LinkedIn</option><option value="whatsapp">WhatsApp</option><option value="google">Google</option><option value="evento">Evento</option><option value="otro">Otro</option></select></label><label>Primer contacto<input id="clientFirstContact" type="date"></label><label>Último contacto<input id="clientLastContact" type="date" data-min-date="clientFirstContact"></label><label>Próximo seguimiento<input id="clientNextFollowUp" type="date"></label></div><div class="date-shortcuts"><button type="button" data-date-target="clientNextFollowUp" data-days="3">En 3 días</button><button type="button" data-date-target="clientNextFollowUp" data-days="7">En 1 semana</button><button type="button" data-date-target="clientNextFollowUp" data-days="15">En 15 días</button><button type="button" data-date-target="clientNextFollowUp" data-days="30">En 1 mes</button></div></fieldset><fieldset class="form-section"><legend>Notas</legend><label>Notas internas<textarea id="clientObservations" rows="3" maxlength="2000" placeholder="Riesgos, oportunidades, acuerdos, contexto..."></textarea></label></fieldset><div class="form-actions"><button class="ghost-button" id="cancelClientEdit" type="button">Cancelar</button><button class="primary-button" type="submit">Guardar cliente</button></div></form>
                     </section>
 
                     <section class="panel">
@@ -434,29 +403,7 @@
                                 <h2 id="paymentFormTitle">Registrar pago</h2>
                             </div>
                         </div>
-                        <form id="paymentForm" class="data-form" novalidate>
-                            <input type="hidden" id="paymentId">
-                            <label>Factura<select id="paymentInvoice"></select></label>
-                            <label>Cliente<select id="paymentClient" required></select></label>
-                            <label>Proyecto<select id="paymentProject"></select></label>
-                            <div class="form-row">
-                                <label>Monto<input id="paymentAmount" required min="1" step="0.01" type="number"></label>
-                                <label>Moneda<select id="paymentCurrency" required><option value="ARS">ARS</option><option value="USD">USD</option></select></label>
-                            </div>
-                            <div class="form-row">
-                                <label>Fecha<input id="paymentDate" required type="date"></label>
-                                <label>Vencimiento<input id="paymentDueDate" required type="date"></label>
-                            </div>
-                            <div class="form-row">
-                                <label>Estado<select id="paymentStatus" required><option value="pagado">Pagado</option><option value="pendiente">Pendiente</option><option value="vencido">Vencido</option></select></label>
-                                <label>Método de pago<input id="paymentMethod" required type="text" placeholder="Transferencia, efectivo, PayPal..."></label>
-                            </div>
-                            <label>Notas<textarea id="paymentNotes" rows="3" placeholder="Detalle interno"></textarea></label>
-                            <div class="form-actions">
-                                <button class="ghost-button" id="cancelPaymentEdit" type="button">Cancelar</button>
-                                <button class="primary-button" type="submit">Guardar pago</button>
-                            </div>
-                        </form>
+                        <form id="paymentForm" class="data-form" novalidate><input type="hidden" id="paymentId"><fieldset class="form-section"><legend>Origen</legend><label>Factura que paga<select id="paymentInvoice"></select></label><div class="form-row"><label>Cliente<select id="paymentClient" required></select></label><label>Proyecto<select id="paymentProject"></select></label></div><div class="form-preview" id="paymentPreview"></div></fieldset><fieldset class="form-section"><legend>Pago</legend><div class="form-row"><label>Monto<input id="paymentAmount" required min="0.01" step="0.01" type="number" inputmode="decimal"></label><label>Moneda<select id="paymentCurrency" required><option value="ARS">ARS</option><option value="USD">USD</option></select></label><label>Cotización aplicada<input id="paymentExchangeRate" min="0" step="0.01" type="number" inputmode="decimal" placeholder="Solo si es USD"></label></div><div class="form-row"><label>Fecha de cobro<input id="paymentDate" required type="date"></label><label>Vencimiento<input id="paymentDueDate" required type="date"></label><label>Estado<select id="paymentStatus" required><option value="pagado">Pagado</option><option value="pendiente">Pendiente</option><option value="vencido">Vencido</option></select></label></div><div class="form-row"><label>Método<select id="paymentMethod" required><option value="">Elegí un método</option><option value="Transferencia">Transferencia bancaria</option><option value="Efectivo">Efectivo</option><option value="Mercado Pago">Mercado Pago</option><option value="Tarjeta">Tarjeta</option><option value="PayPal">PayPal</option><option value="Payoneer">Payoneer</option><option value="Cripto">Cripto</option><option value="Cheque">Cheque</option><option value="Otro">Otro</option></select></label><label>N° de operación / comprobante<input id="paymentReference" type="text" maxlength="80"></label></div><label>Notas<textarea id="paymentNotes" rows="2" maxlength="1000" placeholder="Detalle interno"></textarea></label></fieldset><div class="form-actions"><button class="ghost-button" id="cancelPaymentEdit" type="button">Cancelar</button><button class="primary-button" type="submit">Guardar pago</button></div></form>
                     </section>
 
                     <section class="panel">
@@ -495,26 +442,7 @@
                                 <h2 id="movementFormTitle">Registrar movimiento</h2>
                             </div>
                         </div>
-                        <form id="movementForm" class="data-form" novalidate>
-                            <input type="hidden" id="movementId">
-                            <div class="segmented-control" role="group" aria-label="Tipo de movimiento">
-                                <label><input type="radio" name="movementType" value="ingreso" checked>Ingreso</label>
-                                <label><input type="radio" name="movementType" value="salida">Salida/Gasto</label>
-                            </div>
-                            <div class="form-row">
-                                <label>Categoría<input id="movementCategory" required type="text" placeholder="Proyecto, software, impuestos..."></label>
-                                <label>Monto<input id="movementAmount" required min="1" step="0.01" type="number"></label>
-                            </div>
-                            <div class="form-row">
-                                <label>Moneda<select id="movementCurrency" required><option value="ARS">ARS</option><option value="USD">USD</option></select></label>
-                                <label>Fecha<input id="movementDate" required type="date"></label>
-                            </div>
-                            <label>Descripción<textarea id="movementDescription" required rows="3" placeholder="Detalle del movimiento"></textarea></label>
-                            <div class="form-actions">
-                                <button class="ghost-button" id="cancelMovementEdit" type="button">Cancelar</button>
-                                <button class="primary-button" type="submit">Guardar movimiento</button>
-                            </div>
-                        </form>
+                        <form id="movementForm" class="data-form" novalidate><input type="hidden" id="movementId"><fieldset class="form-section"><legend>Movimiento</legend><div class="segmented-control" role="group" aria-label="Tipo de movimiento"><label><input type="radio" name="movementType" value="ingreso" checked>Ingreso</label><label><input type="radio" name="movementType" value="salida">Gasto</label></div><div class="form-row"><label>Monto<input id="movementAmount" required min="0.01" step="0.01" type="number" inputmode="decimal"></label><label>Moneda<select id="movementCurrency" required><option value="ARS">ARS</option><option value="USD">USD</option></select></label><label>Fecha<input id="movementDate" required type="date"></label></div><div class="form-row"><label>Categoría<input id="movementCategory" required type="text" list="dlCategories" placeholder="Hosting, impuestos, proyecto..."></label><label>Método<select id="movementMethod"><option value="">Elegí un método</option><option value="Transferencia">Transferencia bancaria</option><option value="Efectivo">Efectivo</option><option value="Mercado Pago">Mercado Pago</option><option value="Tarjeta">Tarjeta</option><option value="PayPal">PayPal</option><option value="Payoneer">Payoneer</option><option value="Cripto">Cripto</option><option value="Cheque">Cheque</option><option value="Otro">Otro</option></select></label></div><label>Descripción<textarea id="movementDescription" required rows="2" maxlength="500" placeholder="Qué fue y para qué"></textarea></label></fieldset><details class="form-section"><summary>Vincular a un cliente o proyecto</summary><div class="form-row"><label>Cliente<select id="movementClient"></select></label><label>Proyecto<select id="movementProject"></select></label></div><p class="form-hint">Los gastos vinculados a un proyecto se descuentan de su ganancia.</p><div class="form-row"><label>N° de comprobante<input id="movementReference" type="text" maxlength="80"></label></div><label class="check-line"><input id="movementRecurring" type="checkbox">Se repite todos los meses</label></details><div class="form-actions"><button class="ghost-button" id="cancelMovementEdit" type="button">Cancelar</button><button class="primary-button" type="submit">Guardar movimiento</button></div></form>
                     </section>
 
                     <section class="panel">
@@ -677,28 +605,7 @@
                                 <h2 id="invoiceFormTitle">Crear factura</h2>
                             </div>
                         </div>
-                        <form id="invoiceForm" class="data-form" novalidate>
-                            <input type="hidden" id="invoiceId">
-                            <label>Cliente<select id="invoiceClient" required></select></label>
-                            <label>Proyecto<select id="invoiceProject"></select></label>
-                            <div class="form-row">
-                                <label>Nro. factura<input id="invoiceNumber" required type="text" placeholder="F-0006"></label>
-                                <label>Monto<input id="invoiceAmount" required min="1" step="0.01" type="number"></label>
-                            </div>
-                            <div class="form-row">
-                                <label>Moneda<select id="invoiceCurrency" required><option value="ARS">ARS</option><option value="USD">USD</option></select></label>
-                                <label>Estado<select id="invoiceStatus" required><option value="pendiente">Pendiente</option><option value="pagada">Pagada</option><option value="vencida">Vencida</option><option value="cancelada">Cancelada</option></select></label>
-                            </div>
-                            <div class="form-row">
-                                <label>Emisión<input id="invoiceIssueDate" required type="date"></label>
-                                <label>Vencimiento<input id="invoiceDueDate" required type="date"></label>
-                            </div>
-                            <label>Notas<textarea id="invoiceNotes" rows="3" placeholder="Notas internas"></textarea></label>
-                            <div class="form-actions">
-                                <button class="ghost-button" id="cancelInvoiceEdit" type="button">Cancelar</button>
-                                <button class="primary-button" type="submit">Guardar factura</button>
-                            </div>
-                        </form>
+                        <form id="invoiceForm" class="data-form" novalidate><input type="hidden" id="invoiceId"><fieldset class="form-section"><legend>Factura</legend><div class="form-row"><label>Cliente<select id="invoiceClient" required></select></label><label>Proyecto<select id="invoiceProject"></select></label></div><div class="form-row"><label>Comprobante<select id="invoiceType"><option value="C">Factura C</option><option value="B">Factura B</option><option value="A">Factura A</option><option value="E">Factura E (exportación)</option><option value="recibo">Recibo</option><option value="proforma">Proforma / presupuesto</option><option value="sin_comprobante">Sin comprobante</option></select></label><label>Número<input id="invoiceNumber" required type="text" maxlength="40" placeholder="F-0001"></label></div><label>Concepto<input id="invoiceConcept" type="text" maxlength="200" placeholder="Desarrollo sitio web - hito 1"></label></fieldset><fieldset class="form-section"><legend>Importe</legend><div class="form-row"><label>Neto (sin IVA)<input id="invoiceSubtotal" min="0" step="0.01" type="number" inputmode="decimal" placeholder="Opcional"></label><label>IVA<select id="invoiceTaxRate"><option value="0">Sin IVA</option><option value="10.5">10,5 %</option><option value="21">21 %</option><option value="27">27 %</option></select></label><label>Total<input id="invoiceAmount" required min="0.01" step="0.01" type="number" inputmode="decimal"></label><label>Moneda<select id="invoiceCurrency" required><option value="ARS">ARS</option><option value="USD">USD</option></select></label></div><p class="form-hint">Si cargás el neto, el total se calcula con el IVA.</p><div class="form-preview" id="invoicePreview"></div></fieldset><fieldset class="form-section"><legend>Fechas y estado</legend><div class="form-row"><label>Emisión<input id="invoiceIssueDate" required type="date"></label><label>Vencimiento<input id="invoiceDueDate" required type="date" data-min-date="invoiceIssueDate"></label><label>Estado<select id="invoiceStatus" required><option value="pendiente">Pendiente</option><option value="pagada">Pagada</option><option value="vencida">Vencida</option><option value="cancelada">Cancelada</option></select></label></div><div class="date-shortcuts"><button type="button" data-date-target="invoiceDueDate" data-date-base="invoiceIssueDate" data-days="7">+7 días</button><button type="button" data-date-target="invoiceDueDate" data-date-base="invoiceIssueDate" data-days="15">+15 días</button><button type="button" data-date-target="invoiceDueDate" data-date-base="invoiceIssueDate" data-days="30">+30 días</button><button type="button" data-date-target="invoiceDueDate" data-date-base="invoiceIssueDate" data-days="60">+60 días</button></div><label>Notas<textarea id="invoiceNotes" rows="2" maxlength="1000" placeholder="Se imprime en la factura"></textarea></label></fieldset><div class="form-actions"><button class="ghost-button" id="cancelInvoiceEdit" type="button">Cancelar</button><button class="primary-button" type="submit">Guardar factura</button></div></form>
                     </section>
 
                     <section class="panel">
@@ -752,35 +659,7 @@
                             <strong>Primero tenés que crear un cliente para poder crear un proyecto.</strong>
                             <button class="primary-button compact" id="goCreateClient" type="button">Crear cliente</button>
                         </div>
-                        <form id="projectForm" class="data-form" novalidate>
-                            <input type="hidden" id="projectId">
-                            <label>Cliente<select id="projectClient" required></select></label>
-                            <label>Nombre del proyecto<input id="projectName" required type="text" placeholder="Ecommerce, web premium, sistema interno..."></label>
-                            <label>Descripción<textarea id="projectDescription" rows="3" placeholder="Alcance y notas del proyecto"></textarea></label>
-                            <div class="form-row">
-                                <label>Presupuesto<input id="projectBudget" required min="1" step="0.01" type="number"></label>
-                                <label>Monto cobrado<input id="projectPaid" min="0" step="0.01" type="number"></label>
-                                <label>Gastos asociados<input id="projectExpenses" min="0" step="0.01" type="number"></label>
-                                <label>Moneda<select id="projectCurrency" required><option value="ARS">ARS</option><option value="USD">USD</option></select></label>
-                            </div>
-                            <div class="form-row">
-                                <label>Estado<select id="projectStatus" required><option value="planificacion">Planificación</option><option value="en_desarrollo">En desarrollo</option><option value="en_revision">En revisión</option><option value="esperando_cliente">Esperando al cliente</option><option value="finalizado">Finalizado</option><option value="cancelado">Cancelado</option></select></label>
-                                <label>Progreso %<input id="projectProgress" required min="0" max="100" step="1" type="number"></label>
-                                <label>Inicio<input id="projectStartDate" type="date"></label>
-                                <label>Entrega<input id="projectDueDate" type="date"></label>
-                            </div>
-                            <div class="form-row">
-                                <label>Responsable<input id="projectResponsible" type="text" placeholder="Responsable interno"></label>
-                                <label>Tecnologías<input id="projectTechnologies" type="text" placeholder="Next.js, WordPress, Figma..."></label>
-                            </div>
-                            <label>Archivos o links importantes<input id="projectLinks" type="text" placeholder="Drive, Figma, repositorio, deploy..."></label>
-                            <label>Notas<textarea id="projectNotes" rows="2" placeholder="Notas internas"></textarea></label>
-                            <label>Checklist<textarea id="projectTasks" rows="3" placeholder="Una tarea por línea"></textarea></label>
-                            <div class="form-actions">
-                                <button class="ghost-button" id="cancelProjectEdit" type="button">Cancelar</button>
-                                <button class="primary-button" type="submit">Guardar proyecto</button>
-                            </div>
-                        </form>
+                        <form id="projectForm" class="data-form" novalidate><input type="hidden" id="projectId"><fieldset class="form-section"><legend>General</legend><label>Cliente<select id="projectClient" required></select></label><div class="form-row"><label>Nombre del proyecto<input id="projectName" required type="text" maxlength="140" placeholder="Ecommerce, web premium, sistema interno..."></label><label>Tipo<select id="projectType"><option value="">Sin definir</option><option value="sitio_web">Sitio web</option><option value="landing">Landing page</option><option value="ecommerce">Ecommerce</option><option value="sistema">Sistema web</option><option value="app">App</option><option value="branding">Branding / diseño</option><option value="mantenimiento">Mantenimiento</option><option value="marketing">Marketing</option><option value="otro">Otro</option></select></label><label>Prioridad<select id="projectPriority"><option value="baja">Baja</option><option value="media" selected>Media</option><option value="alta">Alta</option><option value="urgente">Urgente</option></select></label></div><label>Descripción y alcance<textarea id="projectDescription" rows="3" maxlength="3000" placeholder="Qué incluye y qué no, entregables..."></textarea></label></fieldset><fieldset class="form-section"><legend>Planificación</legend><div class="form-row"><label>Estado<select id="projectStatus" required><option value="planificacion">Planificación</option><option value="en_desarrollo">En desarrollo</option><option value="en_revision">En revisión</option><option value="esperando_cliente">Esperando al cliente</option><option value="finalizado">Finalizado</option><option value="cancelado">Cancelado</option></select></label><label>Responsable<input id="projectResponsible" type="text" list="dlTeam" placeholder="Quién lo lidera"></label><label>Horas estimadas<input id="projectEstimatedHours" type="number" min="0" step="0.5" inputmode="decimal"></label></div><label>Avance<div class="range-row"><input id="projectProgressRange" type="range" min="0" max="100" step="5" data-sync-with="projectProgress" aria-label="Avance"><input id="projectProgress" required min="0" max="100" step="1" type="number" data-sync-with="projectProgressRange" data-label="Avance"></div></label><div class="form-row"><label>Inicio<input id="projectStartDate" type="date"></label><label>Entrega<input id="projectDueDate" type="date" data-min-date="projectStartDate"></label></div><div class="date-shortcuts"><button type="button" data-date-target="projectDueDate" data-date-base="projectStartDate" data-days="14">+2 semanas</button><button type="button" data-date-target="projectDueDate" data-date-base="projectStartDate" data-days="30">+1 mes</button><button type="button" data-date-target="projectDueDate" data-date-base="projectStartDate" data-days="60">+2 meses</button><button type="button" data-date-target="projectDueDate" data-date-base="projectStartDate" data-days="90">+3 meses</button></div></fieldset><fieldset class="form-section"><legend>Números</legend><div class="form-row"><label>Presupuesto<input id="projectBudget" required min="0" step="0.01" type="number" inputmode="decimal"></label><label>Moneda<select id="projectCurrency" required><option value="ARS">ARS</option><option value="USD">USD</option></select></label><label>Cobrado<input id="projectPaid" min="0" step="0.01" type="number" inputmode="decimal"></label><label>Gastos<input id="projectExpenses" min="0" step="0.01" type="number" inputmode="decimal"></label></div><div class="form-preview" id="projectPreview"></div></fieldset><details class="form-section"><summary>Recursos y links</summary><div class="form-row"><label>Repositorio<input id="projectRepo" type="url" placeholder="github.com/..."></label><label>Diseño (Figma)<input id="projectDesign" type="url" placeholder="figma.com/..."></label><label>Sitio publicado<input id="projectDeploy" type="url" placeholder="cliente.com"></label></div><div class="form-row"><label>Tecnologías<input id="projectTechnologies" type="text" placeholder="Next.js, WordPress, Figma..."></label><label>Otros links<input id="projectLinks" type="text" placeholder="Drive, Notion..."></label></div><label>Checklist<textarea id="projectTasks" rows="3" placeholder="Una tarea por línea"></textarea></label><label>Notas<textarea id="projectNotes" rows="2" maxlength="2000"></textarea></label></details><div class="form-actions"><button class="ghost-button" id="cancelProjectEdit" type="button">Cancelar</button><button class="primary-button" type="submit">Guardar proyecto</button></div></form>
                     </section>
 
                     <section class="panel">
@@ -837,27 +716,7 @@
                                 <h2 id="requestFormTitle">Nuevo pedido</h2>
                             </div>
                         </div>
-                        <form id="requestForm" class="data-form" novalidate>
-                            <input type="hidden" id="requestId">
-                            <label>Cliente<select id="requestClient" required></select></label>
-                            <label>Proyecto<select id="requestProject"></select></label>
-                            <label>Descripción<textarea id="requestDescription" required rows="3"></textarea></label>
-                            <div class="form-row">
-                                <label>Tipo<select id="requestType" required><option value="nueva_pagina">Nueva página</option><option value="cambio_diseno">Cambio de diseño</option><option value="correccion">Corrección</option><option value="nueva_funcionalidad">Nueva funcionalidad</option><option value="revision">Revisión</option><option value="mantenimiento">Mantenimiento</option><option value="consulta">Consulta</option><option value="urgente">Urgente</option></select></label>
-                                <label>Estado<select id="requestStatus" required><option value="pendiente">Pendiente</option><option value="en_proceso">En proceso</option><option value="esperando_respuesta">Esperando respuesta</option><option value="completado">Completado</option><option value="cancelado">Cancelado</option></select></label>
-                                <label>Prioridad<select id="requestPriority" required><option value="baja">Baja</option><option value="media">Media</option><option value="alta">Alta</option><option value="urgente">Urgente</option></select></label>
-                            </div>
-                            <div class="form-row">
-                                <label>Responsable<input id="requestResponsible" required type="text"></label>
-                                <label>Fecha pedido<input id="requestDate" required type="date"></label>
-                                <label>Entrega estimada<input id="requestDueDate" type="date"></label>
-                            </div>
-                            <label>Notas<textarea id="requestNotes" rows="2"></textarea></label>
-                            <div class="form-actions">
-                                <button class="ghost-button" id="cancelRequestEdit" type="button">Cancelar</button>
-                                <button class="primary-button" type="submit">Guardar pedido</button>
-                            </div>
-                        </form>
+                        <form id="requestForm" class="data-form" novalidate><input type="hidden" id="requestId"><fieldset class="form-section"><legend>Pedido</legend><div class="form-row"><label>Cliente<select id="requestClient" required></select></label><label>Proyecto<select id="requestProject"></select></label></div><label>Qué pide<textarea id="requestDescription" required rows="3" maxlength="3000"></textarea></label><div class="form-row"><label>Tipo<select id="requestType" required><option value="nueva_pagina">Nueva página</option><option value="cambio_diseno">Cambio de diseño</option><option value="correccion">Corrección</option><option value="nueva_funcionalidad">Nueva funcionalidad</option><option value="revision">Revisión</option><option value="mantenimiento">Mantenimiento</option><option value="consulta">Consulta</option><option value="urgente">Urgente</option></select></label><label>Llegó por<select id="requestChannel"><option value="">Sin dato</option><option value="email">Email</option><option value="whatsapp">WhatsApp</option><option value="llamada">Llamada</option><option value="reunion">Reunión</option><option value="portal">Portal del cliente</option><option value="otro">Otro</option></select></label><label>Prioridad<select id="requestPriority" required><option value="baja">Baja</option><option value="media" selected>Media</option><option value="alta">Alta</option><option value="urgente">Urgente</option></select></label></div></fieldset><fieldset class="form-section"><legend>Seguimiento</legend><div class="form-row"><label>Estado<select id="requestStatus" required><option value="pendiente">Pendiente</option><option value="en_proceso">En proceso</option><option value="esperando_respuesta">Esperando respuesta</option><option value="completado">Completado</option><option value="cancelado">Cancelado</option></select></label><label>Responsable<input id="requestResponsible" required type="text" list="dlTeam"></label><label>Horas estimadas<input id="requestEstimatedHours" type="number" min="0" step="0.5" inputmode="decimal"></label></div><div class="form-row"><label>Fecha del pedido<input id="requestDate" required type="date"></label><label>Entrega estimada<input id="requestDueDate" type="date" data-min-date="requestDate"></label></div><div class="date-shortcuts"><button type="button" data-date-target="requestDueDate" data-date-base="requestDate" data-days="2">+2 días</button><button type="button" data-date-target="requestDueDate" data-date-base="requestDate" data-days="7">+1 semana</button><button type="button" data-date-target="requestDueDate" data-date-base="requestDate" data-days="14">+2 semanas</button></div><div class="form-row"><label class="check-line"><input id="requestBillable" type="checkbox">Se cobra aparte</label><label>Monto a cobrar<input id="requestCost" type="number" min="0" step="0.01" inputmode="decimal"></label></div><label>Notas<textarea id="requestNotes" rows="2" maxlength="2000"></textarea></label></fieldset><div class="form-actions"><button class="ghost-button" id="cancelRequestEdit" type="button">Cancelar</button><button class="primary-button" type="submit">Guardar pedido</button></div></form>
                     </section>
                     <section class="panel">
                         <div class="panel-header">
@@ -879,15 +738,7 @@
                 <div class="content-grid two-columns">
                     <section class="panel modal-panel" id="noteModal" data-modal>
                         <div class="panel-header"><div><p class="eyebrow">Notas</p><h2 id="noteFormTitle">Nota interna</h2></div></div>
-                        <form id="noteForm" class="data-form" novalidate>
-                            <input type="hidden" id="noteId">
-                            <label>Cliente<select id="noteClient" required></select></label>
-                            <label>Proyecto<select id="noteProject"></select></label>
-                            <label>Título<input id="noteTitle" required type="text"></label>
-                            <label>Contenido<textarea id="noteContent" required rows="3"></textarea></label>
-                            <label>Tono<select id="noteTone"><option value="normal">Normal</option><option value="riesgo">Riesgo</option><option value="oportunidad">Oportunidad</option></select></label>
-                            <button class="primary-button" type="submit">Guardar nota</button>
-                        </form>
+                        <form id="noteForm" class="data-form" novalidate><input type="hidden" id="noteId"><fieldset class="form-section"><legend>Nota</legend><div class="form-row"><label>Cliente<select id="noteClient" required></select></label><label>Proyecto<select id="noteProject"></select></label></div><div class="form-row"><label>Título<input id="noteTitle" required type="text" maxlength="140"></label><label>Fecha<input id="noteDate" type="date"></label><label>Tipo<select id="noteTone"><option value="normal">Normal</option><option value="riesgo">Riesgo</option><option value="oportunidad">Oportunidad</option></select></label></div><label>Contenido<textarea id="noteContent" required rows="4" maxlength="4000"></textarea></label></fieldset><div class="form-actions"><button class="ghost-button" id="cancelNoteEdit" type="button">Cancelar</button><button class="primary-button" type="submit">Guardar nota</button></div></form>
                     </section>
                     <section class="panel">
                         <div class="panel-header"><div><p class="eyebrow">Notas</p><h2>Notas internas</h2></div><button class="primary-button compact write-action" data-open-modal="noteModal" type="button">Nueva nota</button></div>
@@ -895,18 +746,7 @@
                     </section>
                     <section class="panel modal-panel" id="actionModal" data-modal>
                         <div class="panel-header"><div><p class="eyebrow">Próximas acciones</p><h2 id="actionFormTitle">Nueva acción</h2></div></div>
-                        <form id="actionForm" class="data-form" novalidate>
-                            <input type="hidden" id="actionId">
-                            <label>Cliente<select id="actionClient" required></select></label>
-                            <label>Proyecto<select id="actionProject"></select></label>
-                            <label>Acción<input id="actionTitle" required type="text" placeholder="Enviar presupuesto, cobrar cuota..."></label>
-                            <div class="form-row">
-                                <label>Vence<input id="actionDueDate" required type="date"></label>
-                                <label>Prioridad<select id="actionPriority" required><option value="baja">Baja</option><option value="media">Media</option><option value="alta">Alta</option><option value="urgente">Urgente</option></select></label>
-                                <label>Estado<select id="actionStatus" required><option value="pendiente">Pendiente</option><option value="completada">Completada</option><option value="cancelada">Cancelada</option></select></label>
-                            </div>
-                            <button class="primary-button" type="submit">Guardar acción</button>
-                        </form>
+                        <form id="actionForm" class="data-form" novalidate><input type="hidden" id="actionId"><fieldset class="form-section"><legend>Próxima acción</legend><div class="form-row"><label>Cliente<select id="actionClient" required></select></label><label>Proyecto<select id="actionProject"></select></label></div><div class="form-row"><label>Acción<input id="actionTitle" required type="text" maxlength="160" placeholder="Llamar para confirmar propuesta"></label><label>Tipo<select id="actionType"><option value="seguimiento">Seguimiento</option><option value="llamada">Llamada</option><option value="email">Email</option><option value="reunion">Reunión</option><option value="propuesta">Enviar propuesta</option><option value="cobranza">Cobranza</option><option value="otro">Otro</option></select></label></div><div class="form-row"><label>Vence<input id="actionDueDate" required type="date"></label><label>Responsable<input id="actionResponsible" type="text" list="dlTeam"></label><label>Prioridad<select id="actionPriority" required><option value="baja">Baja</option><option value="media" selected>Media</option><option value="alta">Alta</option><option value="urgente">Urgente</option></select></label><label>Estado<select id="actionStatus" required><option value="pendiente">Pendiente</option><option value="completada">Completada</option><option value="cancelada">Cancelada</option></select></label></div><div class="date-shortcuts"><button type="button" data-date-target="actionDueDate" data-days="0">Hoy</button><button type="button" data-date-target="actionDueDate" data-days="1">Mañana</button><button type="button" data-date-target="actionDueDate" data-days="7">En 1 semana</button></div><label>Notas<textarea id="actionNotes" rows="2" maxlength="1000"></textarea></label></fieldset><div class="form-actions"><button class="ghost-button" id="cancelActionEdit" type="button">Cancelar</button><button class="primary-button" type="submit">Guardar acción</button></div></form>
                     </section>
                     <section class="panel">
                         <div class="panel-header"><div><p class="eyebrow">Próximas acciones</p><h2>Seguimiento</h2></div><button class="primary-button compact write-action" data-open-modal="actionModal" type="button">Nueva acción</button></div>
@@ -924,25 +764,7 @@
                                 <h2 id="taskFormTitle">Nueva tarea</h2>
                             </div>
                         </div>
-                        <form id="taskForm" class="data-form" novalidate>
-                            <input type="hidden" id="taskId">
-                            <label>Título<input id="taskTitle" required type="text"></label>
-                            <label>Descripción<textarea id="taskDescription" rows="3"></textarea></label>
-                            <label>Cliente<select id="taskClient" required></select></label>
-                            <label>Proyecto<select id="taskProject"></select></label>
-                            <div class="form-row">
-                                <label>Responsable<input id="taskResponsible" required type="text"></label>
-                                <label>Prioridad<select id="taskPriority" required><option value="baja">Baja</option><option value="media">Media</option><option value="alta">Alta</option><option value="urgente">Urgente</option></select></label>
-                                <label>Estado<select id="taskStatus" required><option value="pendiente">Pendiente</option><option value="en_proceso">En proceso</option><option value="en_revision">En revisión</option><option value="completada">Completada</option><option value="cancelada">Cancelada</option></select></label>
-                            </div>
-                            <label>Fecha limite<input id="taskDueDate" required type="date"></label>
-                            <label>Checklist<textarea id="taskChecklist" rows="3" placeholder="Una tarea por línea"></textarea></label>
-                            <label>Comentarios<textarea id="taskComments" rows="2"></textarea></label>
-                            <div class="form-actions">
-                                <button class="ghost-button" id="cancelTaskEdit" type="button">Cancelar</button>
-                                <button class="primary-button" type="submit">Guardar tarea</button>
-                            </div>
-                        </form>
+                        <form id="taskForm" class="data-form" novalidate><input type="hidden" id="taskId"><fieldset class="form-section"><legend>Tarea</legend><label>Título<input id="taskTitle" required type="text" maxlength="160"></label><label>Descripción<textarea id="taskDescription" rows="3" maxlength="3000"></textarea></label><div class="form-row"><label>Cliente<select id="taskClient" required></select></label><label>Proyecto<select id="taskProject"></select></label></div></fieldset><fieldset class="form-section"><legend>Responsable y plazos</legend><div class="form-row"><label>Responsable<input id="taskResponsible" required type="text" list="dlTeam"></label><label>Prioridad<select id="taskPriority" required><option value="baja">Baja</option><option value="media" selected>Media</option><option value="alta">Alta</option><option value="urgente">Urgente</option></select></label><label>Estado<select id="taskStatus" required><option value="pendiente">Pendiente</option><option value="en_proceso">En proceso</option><option value="en_revision">En revisión</option><option value="completada">Completada</option><option value="cancelada">Cancelada</option></select></label></div><div class="form-row"><label>Inicio<input id="taskStartDate" type="date"></label><label>Fecha límite<input id="taskDueDate" required type="date" data-min-date="taskStartDate"></label><label>Horas estimadas<input id="taskEstimatedHours" type="number" min="0" step="0.5" inputmode="decimal"></label></div><div class="date-shortcuts"><button type="button" data-date-target="taskDueDate" data-days="1">Mañana</button><button type="button" data-date-target="taskDueDate" data-days="3">En 3 días</button><button type="button" data-date-target="taskDueDate" data-days="7">En 1 semana</button><button type="button" data-date-target="taskDueDate" data-days="14">En 2 semanas</button></div></fieldset><details class="form-section"><summary>Detalle</summary><label>Checklist<textarea id="taskChecklist" rows="3" placeholder="Un paso por línea"></textarea></label><label>Comentarios<textarea id="taskComments" rows="2" maxlength="2000"></textarea></label></details><div class="form-actions"><button class="ghost-button" id="cancelTaskEdit" type="button">Cancelar</button><button class="primary-button" type="submit">Guardar tarea</button></div></form>
                     </section>
                     <section class="panel">
                         <div class="panel-header">
@@ -972,23 +794,7 @@
                 <div class="content-grid form-and-table">
                     <section class="panel modal-panel" id="goalModal" data-modal>
                         <div class="panel-header"><div><p class="eyebrow">Objetivos sCode</p><h2 id="goalFormTitle">Nueva meta</h2></div></div>
-                        <form id="goalForm" class="data-form" novalidate>
-                            <input type="hidden" id="goalId">
-                            <label>Nombre<input id="goalName" required type="text"></label>
-                            <div class="form-row">
-                                <label>Período<select id="goalPeriod" required><option value="mensual">Mensual</option><option value="trimestral">Trimestral</option><option value="anual">Anual</option></select></label>
-                                <label>Tipo<select id="goalType" required><option value="ingresos">Ingresos</option><option value="ganancia_neta">Ganancia neta</option><option value="clientes_nuevos">Clientes nuevos</option><option value="proyectos_finalizados">Proyectos finalizados</option><option value="presupuestos_enviados">Presupuestos enviados</option><option value="reduccion_gastos">Reducción de gastos</option><option value="seguimiento_clientes">Seguimiento de clientes</option></select></label>
-                            </div>
-                            <div class="form-row">
-                                <label>Valor objetivo<input id="goalTarget" required min="1" step="0.01" type="number"></label>
-                                <label>Valor actual<input id="goalCurrent" required min="0" step="0.01" type="number"></label>
-                                <label>Fecha limite<input id="goalDueDate" required type="date"></label>
-                            </div>
-                            <div class="form-actions">
-                                <button class="ghost-button" id="cancelGoalEdit" type="button">Cancelar</button>
-                                <button class="primary-button" type="submit">Guardar meta</button>
-                            </div>
-                        </form>
+                        <form id="goalForm" class="data-form" novalidate><input type="hidden" id="goalId"><fieldset class="form-section"><legend>Meta</legend><label>Nombre<input id="goalName" required type="text" maxlength="140" placeholder="Ej: Facturar 3M en el trimestre"></label><div class="form-row"><label>Período<select id="goalPeriod" required><option value="mensual">Mensual</option><option value="trimestral">Trimestral</option><option value="anual">Anual</option></select></label><label>Tipo<select id="goalType" required><option value="ingresos">Ingresos</option><option value="ganancia_neta">Ganancia neta</option><option value="clientes_nuevos">Clientes nuevos</option><option value="proyectos_finalizados">Proyectos finalizados</option><option value="presupuestos_enviados">Presupuestos enviados</option><option value="reduccion_gastos">Reducción de gastos</option><option value="seguimiento_clientes">Seguimiento de clientes</option></select></label><label>Unidad<select id="goalUnit"><option value="ARS">Pesos (ARS)</option><option value="USD">Dólares (USD)</option><option value="cantidad">Cantidad</option><option value="porcentaje">Porcentaje</option></select></label></div></fieldset><fieldset class="form-section"><legend>Objetivo y avance</legend><div class="form-row"><label>Valor objetivo<input id="goalTarget" required min="0.01" step="0.01" type="number" inputmode="decimal"></label><label>Valor actual<input id="goalCurrent" required min="0" step="0.01" type="number" inputmode="decimal"></label></div><div class="form-preview" id="goalPreview"></div><div class="form-row"><label>Desde<input id="goalStartDate" type="date"></label><label>Fecha límite<input id="goalDueDate" required type="date" data-min-date="goalStartDate"></label><label>Responsable<input id="goalResponsible" type="text" list="dlTeam"></label></div><label>Notas<textarea id="goalNotes" rows="2" maxlength="1000" placeholder="Cómo se mide, plan para llegar..."></textarea></label></fieldset><div class="form-actions"><button class="ghost-button" id="cancelGoalEdit" type="button">Cancelar</button><button class="primary-button" type="submit">Guardar meta</button></div></form>
                     </section>
                     <section class="panel">
                         <div class="panel-header">
@@ -1012,27 +818,7 @@
                 <div class="content-grid form-and-table">
                     <section class="panel modal-panel" id="opportunityModal" data-modal>
                         <div class="panel-header"><div><p class="eyebrow">Pipeline comercial</p><h2 id="opportunityFormTitle">Nueva oportunidad</h2></div></div>
-                        <form id="opportunityForm" class="data-form" novalidate>
-                            <input type="hidden" id="opportunityId">
-                            <label>Cliente<select id="opportunityClient" required></select></label>
-                            <label>Título<input id="opportunityTitle" required type="text" placeholder="Landing, mantenimiento, ecommerce..."></label>
-                            <div class="form-row">
-                                <label>Servicio<input id="opportunityService" required type="text"></label>
-                                <label>Valor estimado<input id="opportunityValue" required min="1" step="0.01" type="number"></label>
-                                <label>Moneda<select id="opportunityCurrency" required><option value="ARS">ARS</option><option value="USD">USD</option></select></label>
-                            </div>
-                            <div class="form-row">
-                                <label>Probabilidad %<input id="opportunityProbability" required min="0" max="100" step="1" type="number"></label>
-                                <label>Estado<select id="opportunityStatus" required><option value="lead_nuevo">Lead nuevo</option><option value="contactado">Contactado</option><option value="respondio">Respondio</option><option value="reunion_agendada">Reunión agendada</option><option value="presupuesto_enviado">Presupuesto enviado</option><option value="negociacion">Negociación</option><option value="aprobado">Aprobado</option><option value="rechazado">Rechazado</option><option value="perdido">Perdido</option></select></label>
-                                <label>Responsable<input id="opportunityResponsible" type="text"></label>
-                            </div>
-                            <label>Próxima acción<input id="opportunityNextAction" type="text"></label>
-                            <label>Notas<textarea id="opportunityNotes" rows="2"></textarea></label>
-                            <div class="form-actions">
-                                <button class="ghost-button" id="cancelOpportunityEdit" type="button">Cancelar</button>
-                                <button class="primary-button" type="submit">Guardar oportunidad</button>
-                            </div>
-                        </form>
+                        <form id="opportunityForm" class="data-form" novalidate><input type="hidden" id="opportunityId"><fieldset class="form-section"><legend>Oportunidad</legend><div class="form-row"><label>Cliente<select id="opportunityClient" required></select></label><label>Contacto<input id="opportunityContact" type="text" maxlength="120" placeholder="Con quién se habla"></label></div><div class="form-row"><label>Título<input id="opportunityTitle" required type="text" maxlength="160"></label><label>Servicio<input id="opportunityService" required type="text" list="dlServices"></label><label>Cómo llegó<select id="opportunitySource"><option value="">Sin dato</option><option value="referido">Referido</option><option value="web">Sitio web</option><option value="instagram">Instagram</option><option value="linkedin">LinkedIn</option><option value="whatsapp">WhatsApp</option><option value="google">Google</option><option value="campana">Campaña de marketing</option><option value="otro">Otro</option></select></label></div></fieldset><fieldset class="form-section"><legend>Valor y probabilidad</legend><div class="form-row"><label>Valor estimado<input id="opportunityValue" required min="0" step="0.01" type="number" inputmode="decimal"></label><label>Moneda<select id="opportunityCurrency" required><option value="ARS">ARS</option><option value="USD">USD</option></select></label><label>Probabilidad %<input id="opportunityProbability" required min="0" max="100" step="5" type="number"></label><label>Cierre estimado<input id="opportunityExpectedClose" type="date"></label></div><div class="form-preview" id="opportunityPreview"></div></fieldset><fieldset class="form-section"><legend>Seguimiento</legend><div class="form-row"><label>Etapa<select id="opportunityStatus" required><option value="lead_nuevo">Lead nuevo</option><option value="contactado">Contactado</option><option value="respondio">Respondió</option><option value="reunion_agendada">Reunión agendada</option><option value="presupuesto_enviado">Presupuesto enviado</option><option value="negociacion">Negociación</option><option value="aprobado">Aprobado</option><option value="rechazado">Rechazado</option><option value="perdido">Perdido</option></select></label><label>Responsable<input id="opportunityResponsible" type="text" list="dlTeam"></label></div><div class="form-row"><label>Próxima acción<input id="opportunityNextAction" type="text" maxlength="160" placeholder="Enviar propuesta, llamar..."></label><label>Para cuándo<input id="opportunityNextActionDate" type="date"></label></div><label>Notas<textarea id="opportunityNotes" rows="2" maxlength="2000"></textarea></label></fieldset><div class="form-actions"><button class="ghost-button" id="cancelOpportunityEdit" type="button">Cancelar</button><button class="primary-button" type="submit">Guardar oportunidad</button></div></form>
                     </section>
                     <section class="panel">
                         <div class="panel-header"><div><p class="eyebrow">CRM / Ventas</p><h2>Pipeline comercial</h2></div><button class="primary-button compact write-action" data-open-modal="opportunityModal" type="button">Nueva oportunidad</button></div>
@@ -1053,31 +839,7 @@
                 <div class="content-grid form-and-table">
                     <section class="panel modal-panel" id="budgetModal" data-modal>
                         <div class="panel-header"><div><p class="eyebrow">Presupuestos</p><h2 id="budgetFormTitle">Nuevo presupuesto</h2></div></div>
-                        <form id="budgetForm" class="data-form" novalidate>
-                            <input type="hidden" id="budgetId">
-                            <div class="form-row">
-                                <label>Cliente<select id="budgetClient"></select></label>
-                                <label>Número<input id="budgetNumber" type="text" placeholder="Auto al guardar"></label>
-                            </div>
-                            <label>Proyecto potencial<input id="budgetProjectName" required type="text"></label>
-                            <div class="form-row">
-                                <label>Emisión<input id="budgetIssueDate" type="date"></label>
-                                <label>Valido hasta<input id="budgetValidUntil" required type="date"></label>
-                            </div>
-                            <label>Items del presupuesto<textarea id="budgetServices" required rows="6" placeholder="Diseño UI:1:180000&#10;Desarrollo web:1:420000&#10;Soporte mensual:3:60000"></textarea></label>
-                            <p class="form-hint">Formato por línea: concepto:cantidad:precio unitario. También acepta concepto:importe para presupuestos rápidos.</p>
-                            <div class="form-row">
-                                <label>Descuento<input id="budgetDiscount" min="0" step="0.01" type="number"></label>
-                                <label>Impuestos<input id="budgetTaxes" min="0" step="0.01" type="number"></label>
-                                <label>Moneda<select id="budgetCurrency" required><option value="ARS">ARS</option><option value="USD">USD</option></select></label>
-                            </div>
-                            <label>Estado<select id="budgetStatus" required><option value="borrador">Borrador</option><option value="enviado">Enviado</option><option value="aprobado">Aprobado</option><option value="rechazado">Rechazado</option><option value="vencido">Vencido</option></select></label>
-                            <label>Notas<textarea id="budgetNotes" rows="2"></textarea></label>
-                            <div class="form-actions">
-                                <button class="ghost-button" id="cancelBudgetEdit" type="button">Cancelar</button>
-                                <button class="primary-button" type="submit">Guardar presupuesto</button>
-                            </div>
-                        </form>
+                        <form id="budgetForm" class="data-form" novalidate><input type="hidden" id="budgetId"><fieldset class="form-section"><legend>Presupuesto</legend><div class="form-row"><label>Cliente<select id="budgetClient"></select></label><label>Número<input id="budgetNumber" type="text" maxlength="40" placeholder="Automático"></label></div><label>Proyecto propuesto<input id="budgetProjectName" required type="text" maxlength="160" placeholder="Sitio web institucional"></label><div class="form-row"><label>Emisión<input id="budgetIssueDate" type="date"></label><label>Válido hasta<input id="budgetValidUntil" required type="date" data-min-date="budgetIssueDate"></label><label>Moneda<select id="budgetCurrency" required><option value="ARS">ARS</option><option value="USD">USD</option></select></label><label>Estado<select id="budgetStatus" required><option value="borrador">Borrador</option><option value="enviado">Enviado</option><option value="aprobado">Aprobado</option><option value="rechazado">Rechazado</option><option value="vencido">Vencido</option></select></label></div><div class="date-shortcuts"><button type="button" data-date-target="budgetValidUntil" data-date-base="budgetIssueDate" data-days="7">+7 días</button><button type="button" data-date-target="budgetValidUntil" data-date-base="budgetIssueDate" data-days="15">+15 días</button><button type="button" data-date-target="budgetValidUntil" data-date-base="budgetIssueDate" data-days="30">+30 días</button></div></fieldset><fieldset class="form-section"><legend>Ítems</legend><div class="items-editor" id="budgetItemsEditor"><div class="items-head"><span>Concepto</span><span>Cant.</span><span>Precio unit.</span><span>Importe</span><span></span></div><div id="budgetItemRows"></div><div class="items-actions"><button class="ghost-button compact" id="budgetAddItem" type="button">+ Agregar ítem</button></div></div><textarea id="budgetServices" hidden></textarea><div class="form-row"><label>Descuento (monto)<input id="budgetDiscount" min="0" step="0.01" type="number" inputmode="decimal"></label><label>Impuestos (monto)<input id="budgetTaxes" min="0" step="0.01" type="number" inputmode="decimal"></label></div><div class="form-preview" id="budgetPreview"></div></fieldset><fieldset class="form-section"><legend>Condiciones</legend><div class="form-row"><label>Forma de pago<input id="budgetPaymentTerms" type="text" maxlength="200" placeholder="50% anticipo y 50% contra entrega"></label><label>Plazo de entrega<input id="budgetDeliveryTime" type="text" maxlength="120" placeholder="4 semanas desde la aprobación"></label></div><label>Notas<textarea id="budgetNotes" rows="2" maxlength="2000" placeholder="Se imprime en el presupuesto"></textarea></label></fieldset><div class="form-actions"><button class="ghost-button" id="cancelBudgetEdit" type="button">Cancelar</button><button class="primary-button" type="submit">Guardar presupuesto</button></div></form>
                     </section>
                     <section class="panel">
                         <div class="panel-header"><div><p class="eyebrow">Propuestas</p><h2>Presupuestos</h2></div><button class="primary-button compact write-action" data-open-modal="budgetModal" type="button">Nuevo presupuesto</button></div>
@@ -1090,27 +852,7 @@
                 <div class="content-grid form-and-table">
                     <section class="panel modal-panel" id="calendarEventModal" data-modal>
                         <div class="panel-header"><div><p class="eyebrow">Agenda</p><h2 id="calendarEventFormTitle">Nuevo evento</h2></div></div>
-                        <form id="calendarEventForm" class="data-form" novalidate>
-                            <input type="hidden" id="calendarEventId">
-                            <label>Título<input id="calendarEventTitle" required type="text"></label>
-                            <div class="form-row">
-                                <label>Tipo<select id="calendarEventType" required><option value="reunion">Reunión</option><option value="entrega">Entrega</option><option value="pago">Pago</option><option value="seguimiento">Seguimiento</option><option value="tarea_interna">Tarea interna</option><option value="marketing">Marketing</option><option value="renovacion">Renovación</option><option value="otro">Otro</option></select></label>
-                                <label>Fecha<input id="calendarEventDate" required type="date"></label>
-                                <label>Prioridad<select id="calendarEventPriority" required><option value="baja">Baja</option><option value="media">Media</option><option value="alta">Alta</option><option value="urgente">Urgente</option></select></label>
-                            </div>
-                            <div class="form-row">
-                                <label>Inicio<input id="calendarEventStart" type="time"></label>
-                                <label>Fin<input id="calendarEventEnd" type="time"></label>
-                                <label>Estado<select id="calendarEventStatus" required><option value="pendiente">Pendiente</option><option value="completado">Completado</option><option value="cancelado">Cancelado</option></select></label>
-                            </div>
-                            <label>Cliente<select id="calendarEventClient"></select></label>
-                            <label>Proyecto<select id="calendarEventProject"></select></label>
-                            <label>Descripción<textarea id="calendarEventDescription" rows="2"></textarea></label>
-                            <div class="form-actions">
-                                <button class="ghost-button" id="cancelCalendarEventEdit" type="button">Cancelar</button>
-                                <button class="primary-button" type="submit">Guardar evento</button>
-                            </div>
-                        </form>
+                        <form id="calendarEventForm" class="data-form" novalidate><input type="hidden" id="calendarEventId"><fieldset class="form-section"><legend>Evento</legend><label>Título<input id="calendarEventTitle" required type="text" maxlength="160"></label><div class="form-row"><label>Tipo<select id="calendarEventType" required><option value="reunion">Reunión</option><option value="entrega">Entrega</option><option value="pago">Pago</option><option value="seguimiento">Seguimiento</option><option value="tarea_interna">Tarea interna</option><option value="marketing">Marketing</option><option value="renovacion">Renovación</option><option value="otro">Otro</option></select></label><label>Prioridad<select id="calendarEventPriority" required><option value="baja">Baja</option><option value="media" selected>Media</option><option value="alta">Alta</option><option value="urgente">Urgente</option></select></label><label>Estado<select id="calendarEventStatus" required><option value="pendiente">Pendiente</option><option value="completado">Completado</option><option value="cancelado">Cancelado</option></select></label></div></fieldset><fieldset class="form-section"><legend>Cuándo y dónde</legend><div class="form-row"><label>Fecha<input id="calendarEventDate" required type="date"></label><label>Desde<input id="calendarEventStart" type="time"></label><label>Hasta<input id="calendarEventEnd" type="time" data-after-time="calendarEventStart"></label></div><div class="date-shortcuts"><button type="button" data-date-target="calendarEventDate" data-days="0">Hoy</button><button type="button" data-date-target="calendarEventDate" data-days="1">Mañana</button><button type="button" data-date-target="calendarEventDate" data-days="7">En 1 semana</button></div><label class="check-line"><input id="calendarEventAllDay" type="checkbox">Todo el día</label><div class="form-row"><label>Lugar o link de la reunión<input id="calendarEventLocation" type="text" maxlength="300" placeholder="Oficina, meet.google.com/..."></label><label>Aviso<select id="calendarEventReminder"><option value="">Sin aviso</option><option value="15">15 minutos antes</option><option value="60">1 hora antes</option><option value="1440">1 día antes</option></select></label></div></fieldset><fieldset class="form-section"><legend>Relacionado con</legend><div class="form-row"><label>Cliente<select id="calendarEventClient"></select></label><label>Proyecto<select id="calendarEventProject"></select></label></div><label>Descripción<textarea id="calendarEventDescription" rows="2" maxlength="2000"></textarea></label></fieldset><div class="form-actions"><button class="ghost-button" id="cancelCalendarEventEdit" type="button">Cancelar</button><button class="primary-button" type="submit">Guardar evento</button></div></form>
                     </section>
                     <section class="panel">
                         <div class="panel-header"><div><p class="eyebrow">Calendario</p><h2>Mes actual</h2></div><button class="primary-button compact write-action" data-open-modal="calendarEventModal" type="button">Nuevo evento</button></div>
@@ -1132,20 +874,7 @@
                 <div class="content-grid form-and-table">
                     <section class="panel modal-panel" id="documentModal" data-modal>
                         <div class="panel-header"><div><p class="eyebrow">Biblioteca</p><h2 id="documentFormTitle">Nuevo documento</h2></div></div>
-                        <form id="documentForm" class="data-form" novalidate>
-                            <input type="hidden" id="documentId">
-                            <label>Nombre<input id="documentName" required type="text"></label>
-                            <label>Tipo<input id="documentType" required type="text" placeholder="Contrato, brief, comprobante..."></label>
-                            <label>Cliente<select id="documentClient"></select></label>
-                            <label>Proyecto<select id="documentProject"></select></label>
-                            <label>Archivo o link<input id="documentLink" type="url" placeholder="https://..."></label>
-                            <label>Etiquetas<input id="documentTags" type="text" placeholder="contrato, legal, cliente"></label>
-                            <label>Descripción<textarea id="documentDescription" rows="2"></textarea></label>
-                            <div class="form-actions">
-                                <button class="ghost-button" id="cancelDocumentEdit" type="button">Cancelar</button>
-                                <button class="primary-button" type="submit">Guardar documento</button>
-                            </div>
-                        </form>
+                        <form id="documentForm" class="data-form" novalidate><input type="hidden" id="documentId"><fieldset class="form-section"><legend>Documento</legend><div class="form-row"><label>Nombre<input id="documentName" required type="text" maxlength="160"></label><label>Tipo<select id="documentType" required><option value="contrato">Contrato</option><option value="propuesta">Propuesta</option><option value="presupuesto">Presupuesto</option><option value="factura">Factura</option><option value="brief">Brief</option><option value="diseno">Diseño</option><option value="manual">Manual / instructivo</option><option value="informe">Informe</option><option value="accesos">Accesos (sin contraseñas)</option><option value="otro">Otro</option></select></label></div><label>Archivo o link<input id="documentLink" type="url" placeholder="drive.google.com/..."></label><div class="form-row"><label>Cliente<select id="documentClient"></select></label><label>Proyecto<select id="documentProject"></select></label></div></fieldset><fieldset class="form-section"><legend>Detalle</legend><div class="form-row"><label>Fecha<input id="documentDate" type="date"></label><label>Vence<input id="documentExpiry" type="date" data-min-date="documentDate"></label><label>Etiquetas<input id="documentTags" type="text" placeholder="legal, 2026, firmado"></label></div><label class="check-line"><input id="documentVisibleToClient" type="checkbox" checked>Mostrar en el portal del cliente</label><label>Descripción<textarea id="documentDescription" rows="2" maxlength="2000"></textarea></label></fieldset><div class="form-actions"><button class="ghost-button" id="cancelDocumentEdit" type="button">Cancelar</button><button class="primary-button" type="submit">Guardar documento</button></div></form>
                     </section>
                     <section class="panel"><div class="panel-header"><div><p class="eyebrow">Archivos</p><h2>Documentos</h2></div><button class="primary-button compact write-action" data-open-modal="documentModal" type="button">Nuevo documento</button></div><div class="resource-grid" id="documentsGrid"></div></section>
                 </div>
@@ -1163,17 +892,7 @@
                 <div class="content-grid form-and-table">
                     <section class="panel modal-panel" id="supportModal" data-modal>
                         <div class="panel-header"><div><p class="eyebrow">Mantenimiento</p><h2 id="supportFormTitle">Nuevo mantenimiento</h2></div></div>
-                        <form id="supportForm" class="data-form" novalidate>
-                            <input type="hidden" id="supportId">
-                            <label>Cliente<select id="supportClient" required></select></label>
-                            <label>Proyecto/Web<select id="supportProject"></select></label>
-                            <div class="form-row"><label>URL<input id="supportUrl" type="url"></label><label>Dominio<input id="supportDomain" type="text"></label><label>Hosting<input id="supportHosting" type="text"></label></div>
-                            <div class="form-row"><label>Renovación dominio<input id="supportDomainRenewal" type="date"></label><label>Renovación hosting<input id="supportHostingRenewal" type="date"></label></div>
-                            <div class="form-row"><label>Plan<input id="supportPlan" required type="text"></label><label>Precio mensual<input id="supportMonthlyPrice" required min="0" step="0.01" type="number"></label><label>Moneda<select id="supportCurrency" required><option value="ARS">ARS</option><option value="USD">USD</option></select></label></div>
-                            <label>Estado<select id="supportStatus" required><option value="activo">Activo</option><option value="pendiente">Pendiente</option><option value="pausado">Pausado</option><option value="finalizado">Finalizado</option></select></label>
-                            <label>Notas<textarea id="supportNotes" rows="2"></textarea></label>
-                            <div class="form-actions"><button class="ghost-button" id="cancelSupportEdit" type="button">Cancelar</button><button class="primary-button" type="submit">Guardar mantenimiento</button></div>
-                        </form>
+                        <form id="supportForm" class="data-form" novalidate><input type="hidden" id="supportId"><fieldset class="form-section"><legend>Cliente y sitio</legend><div class="form-row"><label>Cliente<select id="supportClient" required></select></label><label>Proyecto / web<select id="supportProject"></select></label></div><div class="form-row"><label>URL del sitio<input id="supportUrl" type="url" placeholder="cliente.com"></label><label>Dominio<input id="supportDomain" type="text" placeholder="cliente.com.ar"></label></div><div class="form-row"><label>Registrador del dominio<input id="supportDomainProvider" type="text" list="dlProviders" placeholder="NIC.ar, GoDaddy..."></label><label>Renovación dominio<input id="supportDomainRenewal" type="date"></label></div><div class="form-row"><label>Hosting<input id="supportHosting" type="text" list="dlProviders" placeholder="Hostinger, Vercel..."></label><label>Renovación hosting<input id="supportHostingRenewal" type="date"></label></div></fieldset><fieldset class="form-section"><legend>Plan</legend><div class="form-row"><label>Plan<input id="supportPlan" required type="text" maxlength="120" placeholder="Mantenimiento básico"></label><label>Precio mensual<input id="supportMonthlyPrice" required min="0" step="0.01" type="number" inputmode="decimal"></label><label>Moneda<select id="supportCurrency" required><option value="ARS">ARS</option><option value="USD">USD</option></select></label></div><div class="form-row"><label>Horas incluidas por mes<input id="supportIncludedHours" type="number" min="0" step="0.5" inputmode="decimal"></label><label>Tiempo de respuesta<select id="supportResponseTime"><option value="">Sin definir</option><option value="24h">24 horas</option><option value="48h">48 horas</option><option value="72h">72 horas</option><option value="semanal">Semanal</option></select></label><label>Día de cobro<input id="supportBillingDay" type="number" min="1" max="28" step="1" placeholder="1 a 28"></label></div><div class="form-row"><label>Inicio<input id="supportStartDate" type="date"></label><label>Estado<select id="supportStatus" required><option value="activo">Activo</option><option value="pendiente">Pendiente</option><option value="pausado">Pausado</option><option value="finalizado">Finalizado</option></select></label></div><label>Notas<textarea id="supportNotes" rows="2" maxlength="2000" placeholder="Qué incluye. No guardes contraseñas acá."></textarea></label></fieldset><div class="form-actions"><button class="ghost-button" id="cancelSupportEdit" type="button">Cancelar</button><button class="primary-button" type="submit">Guardar mantenimiento</button></div></form>
                     </section>
                     <section class="panel"><div class="panel-header"><div><p class="eyebrow">Webs entregadas</p><h2>Soporte y mantenimiento</h2></div><button class="primary-button compact write-action" data-open-modal="supportModal" type="button">Nuevo mantenimiento</button></div><div class="table-wrap"><table><thead><tr><th>Cliente</th><th>Plan</th><th>Mensual</th><th>Renovaciones</th><th>Estado</th><th>Acciones</th></tr></thead><tbody id="supportTable"></tbody></table></div></section>
                 </div>
@@ -1187,8 +906,10 @@
                             <input type="hidden" id="teamId">
                             <label>Nombre<input id="teamName" required type="text"></label>
                             <label>Email<input id="teamEmail" required type="email"></label>
-                            <div class="form-row"><label>Rol<input id="teamRole" required type="text" placeholder="Administrador, Finanzas, Desarrollador..."></label><label>Estado<select id="teamStatus" required><option value="activo">Activo</option><option value="inactivo">Inactivo</option></select></label></div>
-                            <label>Foco / permisos<input id="teamFocus" type="text"></label>
+                            <div class="form-row"><label>Puesto<input id="teamRole" required type="text" placeholder="Desarrolladora, diseñador, ventas..."></label><label>Estado<select id="teamStatus" required><option value="activo">Activo</option><option value="inactivo">Inactivo</option></select></label></div>
+                            <div class="form-row"><label>Teléfono<input id="teamPhone" type="tel"></label><label>Área<select id="teamArea"><option value="">Sin definir</option><option value="direccion">Dirección</option><option value="desarrollo">Desarrollo</option><option value="diseno">Diseño</option><option value="comercial">Comercial</option><option value="marketing">Marketing</option><option value="administracion">Administración</option><option value="soporte">Soporte</option></select></label><label>Ingresó<input id="teamStartDate" type="date"></label></div>
+                            <div class="form-row"><label>Habilidades<input id="teamSkills" type="text" placeholder="React, Figma, SEO..."></label><label>Tarifa por hora<input id="teamRate" type="number" min="0" step="0.01" inputmode="decimal"></label><label>Moneda<select id="teamRateCurrency"><option value="ARS">ARS</option><option value="USD">USD</option></select></label></div>
+                            <label>Foco / responsabilidades<input id="teamFocus" type="text"></label>
                             <div class="access-box" id="teamAccessBox" hidden>
                                 <label class="check-toggle"><input id="teamGrantAccess" type="checkbox">Darle acceso a sWallet (entra con este email y puede recibir tareas)</label>
                                 <div class="form-row" id="teamAccessFields" hidden>
@@ -1215,15 +936,7 @@
                 <div class="content-grid form-and-table">
                     <section class="panel modal-panel" id="marketingModal" data-modal>
                         <div class="panel-header"><div><p class="eyebrow">Marketing</p><h2 id="marketingFormTitle">Nueva campaña</h2></div></div>
-                        <form id="marketingForm" class="data-form" novalidate>
-                            <input type="hidden" id="marketingId">
-                            <label>Nombre<input id="marketingName" required type="text"></label>
-                            <label>Rubro objetivo<input id="marketingTarget" required type="text"></label>
-                            <label>Mensaje usado<textarea id="marketingMessage" required rows="3"></textarea></label>
-                            <div class="form-row"><label>Contactos<input id="marketingContacts" min="0" type="number"></label><label>Respuestas<input id="marketingResponses" min="0" type="number"></label><label>Reuniones<input id="marketingMeetings" min="0" type="number"></label><label>Ventas<input id="marketingSales" min="0" type="number"></label></div>
-                            <div class="form-row"><label>Estado<select id="marketingStatus" required><option value="activa">Activa</option><option value="pausada">Pausada</option><option value="cerrada">Cerrada</option></select></label><label>Fecha<input id="marketingDate" required type="date"></label></div>
-                            <div class="form-actions"><button class="ghost-button" id="cancelMarketingEdit" type="button">Cancelar</button><button class="primary-button" type="submit">Guardar campaña</button></div>
-                        </form>
+                        <form id="marketingForm" class="data-form" novalidate><input type="hidden" id="marketingId"><fieldset class="form-section"><legend>Campaña</legend><label>Nombre<input id="marketingName" required type="text" maxlength="140"></label><div class="form-row"><label>Rubro objetivo<input id="marketingTarget" required type="text" list="dlIndustries"></label><label>Canal<select id="marketingChannel"><option value="">Sin definir</option><option value="email">Email</option><option value="linkedin">LinkedIn</option><option value="instagram">Instagram</option><option value="whatsapp">WhatsApp</option><option value="llamadas">Llamadas</option><option value="google_ads">Google Ads</option><option value="meta_ads">Meta Ads</option><option value="evento">Evento</option><option value="otro">Otro</option></select></label><label>Responsable<input id="marketingResponsible" type="text" list="dlTeam"></label></div><label>Mensaje usado<textarea id="marketingMessage" required rows="3" maxlength="3000"></textarea></label></fieldset><fieldset class="form-section"><legend>Resultados</legend><div class="form-row"><label>Contactos<input id="marketingContacts" min="0" step="1" type="number"></label><label>Respuestas<input id="marketingResponses" min="0" step="1" type="number"></label><label>Reuniones<input id="marketingMeetings" min="0" step="1" type="number"></label><label>Ventas<input id="marketingSales" min="0" step="1" type="number"></label></div><div class="form-preview" id="marketingPreview"></div></fieldset><fieldset class="form-section"><legend>Fechas y costo</legend><div class="form-row"><label>Inicio<input id="marketingDate" required type="date"></label><label>Fin<input id="marketingEndDate" type="date" data-min-date="marketingDate"></label><label>Estado<select id="marketingStatus" required><option value="activa">Activa</option><option value="pausada">Pausada</option><option value="cerrada">Cerrada</option></select></label></div><div class="form-row"><label>Inversión<input id="marketingBudget" min="0" step="0.01" type="number" inputmode="decimal"></label><label>Moneda<select id="marketingCurrency"><option value="ARS">ARS</option><option value="USD">USD</option></select></label></div></fieldset><div class="form-actions"><button class="ghost-button" id="cancelMarketingEdit" type="button">Cancelar</button><button class="primary-button" type="submit">Guardar campaña</button></div></form>
                     </section>
                     <section class="panel"><div class="panel-header"><div><p class="eyebrow">Adquisición</p><h2>Campañas</h2></div><button class="primary-button compact write-action" data-open-modal="marketingModal" type="button">Nueva campaña</button></div><div class="table-wrap"><table><thead><tr><th>Campaña</th><th>Contactos/Resp/Reun/Ventas</th><th>Respuesta</th><th>Estado</th><th>Acciones</th></tr></thead><tbody id="marketingTable"></tbody></table></div></section>
                 </div>
@@ -1243,22 +956,24 @@
                     <section class="panel">
                         <div class="panel-header"><div><p class="eyebrow">Empresa</p><h2>Datos de sCode</h2></div></div>
                         <form id="companySettingsForm" class="data-form" novalidate>
-                            <div class="form-row">
-                                <label>Nombre comercial<input id="companyName" required type="text"></label>
-                                <label>Razon social<input id="companyLegalName" type="text"></label>
-                            </div>
-                            <div class="form-row">
-                                <label>Email<input id="companyEmail" type="email" placeholder="contact@scodedigital.com"></label>
-                                <label>Web<input id="companyWebsite" type="url" placeholder="https://scodedigital.com"></label>
-                            </div>
-                            <div class="form-row">
-                                <label>Color principal<input id="companyPrimaryColor" required type="color"></label>
-                                <label>Moneda principal<select id="companyMainCurrency"><option value="ARS">ARS</option><option value="USD">USD</option></select></label>
-                                <label>Moneda secundaria<select id="companySecondaryCurrency"><option value="USD">USD</option><option value="ARS">ARS</option></select></label>
-                                <label>Alertar antes de<input id="companyReminderDays" min="1" max="30" type="number"></label>
-                            </div>
-                            <label>Servicios ofrecidos<textarea id="companyServices" rows="5" placeholder="Un servicio por línea"></textarea></label>
-                            <label>Categorías financieras<textarea id="companyFinanceCategories" rows="5" placeholder="Una categoría por línea"></textarea></label>
+                            <fieldset class="form-section"><legend>Empresa</legend>
+                            <div class="form-row"><label>Nombre comercial<input id="companyName" required type="text" maxlength="120"></label><label>Razón social<input id="companyLegalName" type="text" maxlength="160"></label></div>
+                            <div class="form-row"><label>CUIT<input id="companyTaxId" type="text" maxlength="20" placeholder="30-12345678-9"></label><label>Condición frente al IVA<select id="companyTaxCondition"><option value="">Sin definir</option><option value="responsable_inscripto">Responsable inscripto</option><option value="monotributo">Monotributo</option><option value="exento">Exento</option></select></label></div>
+                            <div class="form-row"><label>Email<input id="companyEmail" type="email"></label><label>Teléfono<input id="companyPhone" type="tel"></label><label>Web<input id="companyWebsite" type="url"></label></div>
+                            <label>Dirección<input id="companyAddress" type="text" maxlength="200"></label>
+                            </fieldset>
+                            <fieldset class="form-section"><legend>Facturas y presupuestos</legend>
+                            <div class="form-row"><label>Prefijo de facturas<input id="companyInvoicePrefix" type="text" maxlength="10" placeholder="F-"></label><label>Prefijo de presupuestos<input id="companyBudgetPrefix" type="text" maxlength="10" placeholder="P-"></label><label>Validez de presupuestos (días)<input id="companyBudgetValidity" type="number" min="1" max="365" step="1"></label><label>Días para pagar una factura<input id="companyInvoiceDueDays" type="number" min="0" max="365" step="1"></label></div>
+                            <label>Forma de pago por defecto<input id="companyPaymentTerms" type="text" maxlength="200" placeholder="50% anticipo y 50% contra entrega"></label>
+                            <label>Datos para transferencias<textarea id="companyBankInfo" rows="3" maxlength="500" placeholder="Banco, CBU / CVU, alias, titular"></textarea></label>
+                            <p class="form-hint">Estos datos aparecen al imprimir facturas y presupuestos.</p>
+                            </fieldset>
+                            <fieldset class="form-section"><legend>Preferencias</legend>
+                            <div class="form-row"><label>Color principal<input id="companyPrimaryColor" required type="color"></label><label>Moneda principal<select id="companyMainCurrency"><option value="ARS">ARS</option><option value="USD">USD</option></select></label><label>Moneda secundaria<select id="companySecondaryCurrency"><option value="USD">USD</option><option value="ARS">ARS</option></select></label><label>Avisar vencimientos con<input id="companyReminderDays" min="1" max="30" type="number" data-label="Días de aviso"></label></div>
+                            <label>Servicios que ofrecen<textarea id="companyServices" rows="4" placeholder="Uno por línea"></textarea></label>
+                            <label>Categorías de ingresos y gastos<textarea id="companyFinanceCategories" rows="4" placeholder="Una por línea"></textarea></label>
+                            <p class="form-hint">Los servicios y categorías aparecen como sugerencias en los formularios.</p>
+                            </fieldset>
                             <button class="primary-button" type="submit">Guardar configuración</button>
                         </form>
                     </section>
@@ -1352,27 +1067,7 @@
                                 <h2 id="subscriptionFormTitle">Nueva suscripción</h2>
                             </div>
                         </div>
-                        <form id="subscriptionForm" class="data-form" novalidate>
-                            <input type="hidden" id="subscriptionId">
-                            <div class="form-row">
-                                <label>Servicio<input id="subscriptionName" required type="text" placeholder="Vercel Pro, dominio, API..."></label>
-                                <label>Proveedor<input id="subscriptionProvider" required type="text" placeholder="Vercel, Namecheap, OpenAI..."></label>
-                            </div>
-                            <label>Categoría<input id="subscriptionCategory" required type="text" placeholder="hosting, dominios, APIs, herramientas..."></label>
-                            <div class="form-row">
-                                <label>Costo mensual<input id="subscriptionMonthly" required min="0" step="0.01" type="number"></label>
-                                <label>Costo anual<input id="subscriptionAnnual" required min="0" step="0.01" type="number"></label>
-                                <label>Moneda<select id="subscriptionCurrency" required><option value="ARS">ARS</option><option value="USD">USD</option></select></label>
-                            </div>
-                            <div class="form-row">
-                                <label>Renovación<input id="subscriptionRenewal" required type="date"></label>
-                                <label>Estado<select id="subscriptionStatus" required><option value="activa">Activa</option><option value="por_vencer">Por vencer</option><option value="vencida">Vencida</option><option value="cancelada">Cancelada</option></select></label>
-                            </div>
-                            <div class="form-actions">
-                                <button class="ghost-button" id="cancelSubscriptionEdit" type="button">Cancelar</button>
-                                <button class="primary-button" type="submit">Guardar suscripción</button>
-                            </div>
-                        </form>
+                        <form id="subscriptionForm" class="data-form" novalidate><input type="hidden" id="subscriptionId"><fieldset class="form-section"><legend>Servicio</legend><div class="form-row"><label>Servicio<input id="subscriptionName" required type="text" maxlength="120" placeholder="Hosting, Figma, Google Workspace..."></label><label>Proveedor<input id="subscriptionProvider" required type="text" list="dlProviders" placeholder="Hostinger, Adobe..."></label><label>Categoría<input id="subscriptionCategory" required type="text" list="dlSubscriptionCategories" placeholder="Hosting, software..."></label></div><div class="form-row"><label>Cuenta o email asociado<input id="subscriptionAccount" type="text" maxlength="120"></label><label>Link para gestionarla<input id="subscriptionUrl" type="url" placeholder="panel.proveedor.com"></label></div></fieldset><fieldset class="form-section"><legend>Costo y renovación</legend><div class="form-row"><label>Se paga<select id="subscriptionCycle"><option value="mensual">Mensual</option><option value="anual">Anual</option></select></label><label>Costo mensual<input id="subscriptionMonthly" required min="0" step="0.01" type="number" inputmode="decimal"></label><label>Costo anual<input id="subscriptionAnnual" required min="0" step="0.01" type="number" inputmode="decimal"></label><label>Moneda<select id="subscriptionCurrency" required><option value="ARS">ARS</option><option value="USD">USD</option></select></label></div><p class="form-hint">Cargá uno de los dos costos: el otro se calcula solo.</p><div class="form-row"><label>Próxima renovación<input id="subscriptionRenewal" required type="date"></label><label>Método de pago<select id="subscriptionPaymentMethod"><option value="">Elegí un método</option><option value="Transferencia">Transferencia bancaria</option><option value="Efectivo">Efectivo</option><option value="Mercado Pago">Mercado Pago</option><option value="Tarjeta">Tarjeta</option><option value="PayPal">PayPal</option><option value="Payoneer">Payoneer</option><option value="Cripto">Cripto</option><option value="Cheque">Cheque</option><option value="Otro">Otro</option></select></label><label>Estado<select id="subscriptionStatus" required><option value="activa">Activa</option><option value="por_vencer">Por vencer</option><option value="vencida">Vencida</option><option value="cancelada">Cancelada</option></select></label></div><div class="date-shortcuts"><button type="button" data-date-target="subscriptionRenewal" data-days="30">En 1 mes</button><button type="button" data-date-target="subscriptionRenewal" data-days="90">En 3 meses</button><button type="button" data-date-target="subscriptionRenewal" data-days="365">En 1 año</button></div><label class="check-line"><input id="subscriptionAutoRenew" type="checkbox" checked>Se renueva automáticamente</label><label>Notas<textarea id="subscriptionNotes" rows="2" maxlength="1000" placeholder="No guardes contraseñas acá"></textarea></label></fieldset><div class="form-actions"><button class="ghost-button" id="cancelSubscriptionEdit" type="button">Cancelar</button><button class="primary-button" type="submit">Guardar suscripción</button></div></form>
                     </section>
 
                     <section class="panel">
@@ -1438,6 +1133,7 @@
     <section class="panel modal-panel task-detail-modal" id="assignmentDetailModal" data-modal aria-labelledby="assignmentDetailTitle">
         <div id="assignmentDetailBody"></div>
     </section>
+    <datalist id="dlTeam"></datalist><datalist id="dlServices"></datalist><datalist id="dlCategories"></datalist><datalist id="dlProviders"></datalist><datalist id="dlIndustries"></datalist><datalist id="dlSubscriptionCategories"></datalist>
     <div class="modal-backdrop" id="modalBackdrop" hidden></div>
     <div class="toast-region" id="toastRegion" aria-live="polite" aria-atomic="true"></div>
     <script>

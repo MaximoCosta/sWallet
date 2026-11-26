@@ -5,6 +5,8 @@ import { changeOwnPassword, createAccount, deleteAccount, updateAccount } from "
 import { filteredInvoices, projectExists, clientExists } from "./finance.js";
 import { createRecord, parseDate, state, toInputDate } from "./state.js";
 import { exportBackup, importBackup, resetStorage, saveState } from "./storage.js";
+import { enhanceForms, refreshPreview, setSelectValue, validateForm } from "./forms.js";
+import { applyInvoiceToPayment, budgetItemErrors, duplicateInvoiceNumber, fillExtra, loadBudgetItems, readExtra, setupFormBehaviors, syncAllDay } from "./form-fields.js";
 import {
   closeMobileMenu,
   dom,
@@ -123,7 +125,14 @@ export function bindEvents() {
   if (dom.authUserForm) dom.authUserForm.addEventListener("submit", handleAuthUserSubmit);
   if (dom.ownPasswordForm) dom.ownPasswordForm.addEventListener("submit", handleOwnPasswordSubmit);
 
+  enhanceForms();
+  setupFormBehaviors();
   dom.cancelClientEdit.addEventListener("click", () => { resetClientForm(); closeModal(); });
+  dom.cancelNoteEdit?.addEventListener("click", () => { resetNoteForm(); closeModal(); });
+  dom.cancelActionEdit?.addEventListener("click", () => { resetActionForm(); closeModal(); });
+  dom.movementClient?.addEventListener("change", syncControls);
+  dom.paymentClient?.addEventListener("change", syncControls);
+  dom.companySettingsForm?.addEventListener("submit", handleCompanySettingsSubmit);
   dom.cancelPaymentEdit.addEventListener("click", () => { resetPaymentForm(); closeModal(); });
   dom.cancelProjectEdit.addEventListener("click", () => { resetProjectForm(); closeModal(); });
   dom.cancelInvoiceEdit.addEventListener("click", () => { resetInvoiceForm(); closeModal(); });
@@ -152,7 +161,6 @@ export function bindEvents() {
     state.selectedPortalClientId = dom.portalClient.value;
     renderAll();
   });
-  dom.paymentInvoice.addEventListener("change", syncPaymentFromInvoice);
   dom.projectFilterClient.addEventListener("input", () => {
     state.projectFilterClientId = dom.projectFilterClient.value;
     renderAll();
@@ -265,6 +273,7 @@ function prepareModals() {
 export function openModal(id) {
   const panel = document.getElementById(id);
   if (!panel) return;
+  panel.querySelectorAll("form").forEach((form) => refreshPreview(form));
   document.querySelectorAll("[data-modal]").forEach((item) => {
     item.classList.remove("modal-open");
     item.setAttribute("aria-hidden", "true");
@@ -352,6 +361,7 @@ async function handleClientSubmit(event) {
   event.preventDefault();
   if (!assertWritable() || !validateForm(dom.clientForm)) return;
   const payload = {
+    ...readExtra("client"),
     userId: state.session.userId,
     name: dom.clientName.value.trim(),
     company: dom.clientCompany.value.trim(),
@@ -393,6 +403,7 @@ async function handleProjectSubmit(event) {
     return;
   }
   const payload = {
+    ...readExtra("project"),
     userId: state.session.userId,
     clientId: dom.projectClient.value,
     name: dom.projectName.value.trim(),
@@ -428,7 +439,7 @@ async function handleProjectSubmit(event) {
 
 function handleInvoiceSubmit(event) {
   event.preventDefault();
-  if (!assertWritable() || !validateForm(dom.invoiceForm)) return;
+  if (!assertWritable() || !validateForm(dom.invoiceForm, duplicateInvoiceNumber() ? [[dom.invoiceNumber, "Ya existe otra factura con este número."]] : [])) return;
   if (!clientExists(dom.invoiceClient.value)) {
     notify("Cliente obligatorio", "No se puede crear una factura sin cliente.");
     return;
@@ -438,6 +449,7 @@ function handleInvoiceSubmit(event) {
     return;
   }
   const payload = {
+    ...readExtra("invoice"),
     userId: state.session.userId,
     clientId: dom.invoiceClient.value,
     projectId: dom.invoiceProject.value,
@@ -460,6 +472,7 @@ function handlePaymentSubmit(event) {
   if (!assertWritable() || !validateForm(dom.paymentForm)) return;
   const invoice = getInvoice(dom.paymentInvoice.value);
   const payload = {
+    ...readExtra("payment"),
     userId: state.session.userId,
     clientId: invoice?.clientId || dom.paymentClient.value,
     projectId: invoice?.projectId || dom.paymentProject.value || "",
@@ -484,8 +497,9 @@ function handlePaymentSubmit(event) {
 
 function handleMovementSubmit(event) {
   event.preventDefault();
-  if (!assertWritable() || !validateForm(dom.movementForm)) return;
+  if (!assertWritable() || !validateForm(dom.movementForm, dom.movementProject.value && dom.movementClient.value && !projectExists(dom.movementProject.value, dom.movementClient.value) ? [[dom.movementProject, "Este proyecto no es de ese cliente."]] : [])) return;
   const payload = {
+    ...readExtra("movement"),
     userId: state.session.userId,
     type: document.querySelector("input[name='movementType']:checked").value,
     category: dom.movementCategory.value.trim(),
@@ -504,6 +518,7 @@ function handleSubscriptionSubmit(event) {
   event.preventDefault();
   if (!assertWritable() || !validateForm(dom.subscriptionForm)) return;
   const payload = {
+    ...readExtra("subscription"),
     userId: state.session.userId,
     name: dom.subscriptionName.value.trim(),
     provider: dom.subscriptionProvider.value.trim(),
@@ -526,6 +541,7 @@ function handleTaskSubmit(event) {
   if (!clientExists(dom.taskClient.value)) return notify("Cliente obligatorio", "La tarea debe tener un cliente asociado.");
   if (dom.taskProject.value && !projectExists(dom.taskProject.value, dom.taskClient.value)) return notify("Proyecto invalido", "El proyecto no pertenece al cliente seleccionado.");
   const payload = {
+    ...readExtra("task"),
     userId: state.session.userId,
     title: dom.taskTitle.value.trim(),
     description: dom.taskDescription.value.trim(),
@@ -548,6 +564,7 @@ function handleGoalSubmit(event) {
   event.preventDefault();
   if (!assertWritable() || !validateForm(dom.goalForm)) return;
   const payload = {
+    ...readExtra("goal"),
     userId: state.session.userId,
     name: dom.goalName.value.trim(),
     period: dom.goalPeriod.value,
@@ -569,6 +586,7 @@ function handleRequestSubmit(event) {
   if (!clientExists(dom.requestClient.value)) return notify("Cliente obligatorio", "El pedido debe pertenecer a un cliente.");
   if (dom.requestProject.value && !projectExists(dom.requestProject.value, dom.requestClient.value)) return notify("Proyecto invalido", "El proyecto no pertenece al cliente seleccionado.");
   const payload = {
+    ...readExtra("request"),
     userId: state.session.userId,
     clientId: dom.requestClient.value,
     projectId: dom.requestProject.value,
@@ -593,14 +611,15 @@ function handleNoteSubmit(event) {
   if (!clientExists(dom.noteClient.value)) return notify("Cliente obligatorio", "La nota debe pertenecer a un cliente.");
   if (dom.noteProject.value && !projectExists(dom.noteProject.value, dom.noteClient.value)) return notify("Proyecto invalido", "El proyecto no pertenece al cliente seleccionado.");
   const payload = {
+    ...readExtra("note"),
     userId: state.session.userId,
     clientId: dom.noteClient.value,
     projectId: dom.noteProject.value,
     title: dom.noteTitle.value.trim(),
     content: dom.noteContent.value.trim(),
-    tone: dom.noteTone.value,
-    date: new Date().toISOString().slice(0, 10)
+    tone: dom.noteTone.value
   };
+  if (!payload.date) payload.date = new Date().toISOString().slice(0, 10);
   if (dom.noteId.value) updateRecord(state.notes, dom.noteId.value, payload);
   else state.notes.push(createRecord(payload));
   resetNoteForm();
@@ -613,6 +632,7 @@ function handleActionSubmit(event) {
   if (!clientExists(dom.actionClient.value)) return notify("Cliente obligatorio", "La acción debe pertenecer a un cliente.");
   if (dom.actionProject.value && !projectExists(dom.actionProject.value, dom.actionClient.value)) return notify("Proyecto invalido", "El proyecto no pertenece al cliente seleccionado.");
   const payload = {
+    ...readExtra("action"),
     userId: state.session.userId,
     clientId: dom.actionClient.value,
     projectId: dom.actionProject.value,
@@ -632,6 +652,7 @@ function handleOpportunitySubmit(event) {
   if (!assertWritable() || !validateForm(dom.opportunityForm)) return;
   if (!clientExists(dom.opportunityClient.value)) return notify("Cliente obligatorio", "La oportunidad debe estar asociada a un cliente.");
   const payload = {
+    ...readExtra("opportunity"),
     userId: state.session.userId,
     clientId: dom.opportunityClient.value,
     title: dom.opportunityTitle.value.trim(),
@@ -652,10 +673,11 @@ function handleOpportunitySubmit(event) {
 
 function handleBudgetSubmit(event) {
   event.preventDefault();
-  if (!assertWritable() || !validateForm(dom.budgetForm)) return;
+  if (!assertWritable() || !validateForm(dom.budgetForm, budgetItemErrors())) return;
   if (dom.budgetClient.value && !clientExists(dom.budgetClient.value)) return notify("Cliente invalido", "Selecciona un cliente existente o deja el presupuesto sin asociar.");
   const issueDate = dom.budgetIssueDate?.value || toInputDate(new Date());
   const payload = {
+    ...readExtra("budget"),
     userId: state.session.userId,
     clientId: dom.budgetClient.value,
     number: dom.budgetNumber?.value.trim() || nextLocalBudgetNumber(),
@@ -681,6 +703,7 @@ function handleCalendarEventSubmit(event) {
   if (dom.calendarEventClient.value && !clientExists(dom.calendarEventClient.value)) return notify("Cliente invalido", "Selecciona un cliente existente.");
   if (dom.calendarEventProject.value && !projectExists(dom.calendarEventProject.value, dom.calendarEventClient.value)) return notify("Proyecto invalido", "El proyecto no pertenece al cliente.");
   const payload = {
+    ...readExtra("calendarEvent"),
     userId: state.session.userId,
     title: dom.calendarEventTitle.value.trim(),
     type: dom.calendarEventType.value,
@@ -704,6 +727,7 @@ function handleDocumentSubmit(event) {
   if (!assertWritable() || !validateForm(dom.documentForm)) return;
   if (dom.documentProject.value && !projectExists(dom.documentProject.value, dom.documentClient.value)) return notify("Proyecto invalido", "El proyecto no pertenece al cliente seleccionado.");
   const payload = {
+    ...readExtra("document"),
     userId: state.session.userId,
     name: dom.documentName.value.trim(),
     type: dom.documentType.value.trim(),
@@ -725,6 +749,7 @@ function handleSupportSubmit(event) {
   if (!clientExists(dom.supportClient.value)) return notify("Cliente obligatorio", "El mantenimiento debe tener cliente.");
   if (dom.supportProject.value && !projectExists(dom.supportProject.value, dom.supportClient.value)) return notify("Proyecto invalido", "El proyecto no pertenece al cliente.");
   const payload = {
+    ...readExtra("support"),
     userId: state.session.userId,
     clientId: dom.supportClient.value,
     projectId: dom.supportProject.value,
@@ -749,6 +774,7 @@ async function handleTeamSubmit(event) {
   event.preventDefault();
   if (!assertWritable() || !validateForm(dom.teamForm)) return;
   const payload = {
+    ...readExtra("team"),
     name: dom.teamName.value.trim(),
     email: dom.teamEmail.value.trim().toLowerCase(),
     role: dom.teamRole.value.trim(),
@@ -802,6 +828,7 @@ function handleMarketingSubmit(event) {
   event.preventDefault();
   if (!assertWritable() || !validateForm(dom.marketingForm)) return;
   const payload = {
+    ...readExtra("marketing"),
     userId: state.session.userId,
     name: dom.marketingName.value.trim(),
     target: dom.marketingTarget.value.trim(),
@@ -942,6 +969,40 @@ async function clearProfilePhoto() {
   }
 }
 
+function handleCompanySettingsSubmit(event) {
+  event.preventDefault();
+  if (!assertDelete()) return notify("Permiso requerido", "Solo un admin puede cambiar la configuración de la empresa.");
+  if (!validateForm(dom.companySettingsForm)) return;
+  const value = (id) => String(dom[id]?.value || "").trim();
+  state.companySettings = {
+    ...state.companySettings,
+    name: value("companyName"),
+    legalName: value("companyLegalName"),
+    taxId: value("companyTaxId"),
+    taxCondition: value("companyTaxCondition"),
+    email: value("companyEmail"),
+    phone: value("companyPhone"),
+    website: value("companyWebsite"),
+    address: value("companyAddress"),
+    invoicePrefix: value("companyInvoicePrefix") || "F-",
+    budgetPrefix: value("companyBudgetPrefix") || "P-",
+    budgetValidity: Number(value("companyBudgetValidity")) || 15,
+    invoiceDueDays: value("companyInvoiceDueDays") === "" ? 10 : Number(value("companyInvoiceDueDays")),
+    paymentTerms: value("companyPaymentTerms"),
+    bankInfo: value("companyBankInfo"),
+    primaryColor: value("companyPrimaryColor") || "#9f5cff",
+    mainCurrency: value("companyMainCurrency") || "ARS",
+    secondaryCurrency: value("companySecondaryCurrency") || "USD",
+    reminderDays: Number(value("companyReminderDays")) || 5,
+    services: value("companyServices"),
+    financeCategories: value("companyFinanceCategories")
+  };
+  dom.companySettingsForm.dataset.dirty = "";
+  saveState();
+  renderAll();
+  notify("Configuración guardada", "Los datos de la empresa se usan en facturas, presupuestos y sugerencias.");
+}
+
 function downloadBackup() {
   const blob = new Blob([exportBackup()], { type: "application/json" });
   const link = document.createElement("a");
@@ -1003,27 +1064,7 @@ function saveExchangeRate() {
   saveAndRender("Cotización actualizada", `1 USD = ${value} ARS.`);
 }
 
-function syncPaymentFromInvoice() {
-  const invoice = getInvoice(dom.paymentInvoice.value);
-  if (!invoice) return;
-  dom.paymentClient.value = invoice.clientId;
-  dom.paymentProject.value = invoice.projectId || "";
-  dom.paymentAmount.value = invoice.amount;
-  dom.paymentCurrency.value = invoice.currency;
-  dom.paymentDueDate.value = invoice.dueDate;
-}
 
-function validateForm(form) {
-  form.querySelectorAll(".field-error").forEach((control) => control.classList.remove("field-error"));
-  const invalid = [...form.querySelectorAll("[required]")].filter((control) => !String(control.value || "").trim());
-  invalid.forEach((control) => control.classList.add("field-error"));
-  if (invalid.length) {
-    notify("Campos incompletos", "Completa los campos marcados para continuar.");
-    invalid[0].focus();
-    return false;
-  }
-  return true;
-}
 
 function updateRecord(collection, id, payload) {
   const index = collection.findIndex((item) => item.id === id);
@@ -1142,7 +1183,7 @@ function printInvoice(id) {
   const pending = Math.max(Number(invoice.amount || 0) - paid, 0);
 
   openPrintSheet({
-    type: "FACTURA",
+    type: invoice.type && invoice.type.length === 1 ? `FACTURA ${invoice.type}` : invoice.type === "recibo" ? "RECIBO" : invoice.type === "proforma" ? "PROFORMA" : "FACTURA",
     number: invoice.number,
     title: project?.name || client?.service || "Servicios sCode",
     client,
@@ -1152,9 +1193,11 @@ function printInvoice(id) {
       ["Estado", labelize(invoice.status)],
       ["Moneda", invoice.currency]
     ],
-    rows: [[project?.name || client?.service || "Servicio profesional", invoice.notes || "Servicio facturado", "1", formatMoney(invoice.amount, invoice.currency), formatMoney(invoice.amount, invoice.currency)]],
+    rows: [[project?.name || client?.service || "Servicio profesional", invoice.concept || invoice.notes || "Servicio facturado", "1", formatMoney(invoice.subtotal || invoice.amount, invoice.currency), formatMoney(invoice.subtotal || invoice.amount, invoice.currency)]],
+    terms: [["Datos para transferir", normalizedCompanySettings().bankInfo]],
     totals: [
-      ["Subtotal", formatMoney(invoice.amount, invoice.currency)],
+      ...(invoice.subtotal && Number(invoice.taxRate) ? [["Neto", formatMoney(invoice.subtotal, invoice.currency)], [`IVA ${invoice.taxRate}%`, formatMoney(Number(invoice.amount) - Number(invoice.subtotal), invoice.currency)]] : []),
+      ["Total", formatMoney(invoice.amount, invoice.currency)],
       ["Pagado", formatMoney(paid, invoice.currency)],
       ["Saldo pendiente", formatMoney(pending, invoice.currency)]
     ],
@@ -1213,7 +1256,8 @@ function printBudget(id) {
       ["Impuestos", formatMoney(Number(budget.taxes || 0), budget.currency)],
       ["Total", formatMoney(total, budget.currency)]
     ],
-    notes: budget.notes || "Presupuesto valido hasta la fecha indicada. Los cambios fuera de alcance se presupuestan aparte."
+    notes: budget.notes || "Presupuesto válido hasta la fecha indicada. Los cambios fuera de alcance se presupuestan aparte.",
+    terms: [["Forma de pago", budget.paymentTerms], ["Plazo de entrega", budget.deliveryTime], ["Datos para transferir", normalizedCompanySettings().bankInfo]]
   });
 }
 
@@ -1290,7 +1334,7 @@ function budgetItems(budget) {
   return rows.length ? rows : [{ name: budget.projectName || "Servicio sCode", quantity: 1, unitPrice: 0, amount: 0 }];
 }
 
-function openPrintSheet({ type, number, title, client, meta, rows, totals, notes }) {
+function openPrintSheet({ type, number, title, client, meta, rows, totals, notes, terms = [] }) {
   const company = normalizedCompanySettings();
   const win = window.open("", "_blank", "width=900,height=1100");
   if (!win) return notify("No se pudo abrir la hoja", "Habilita ventanas emergentes para imprimir.");
@@ -1309,6 +1353,7 @@ function openPrintSheet({ type, number, title, client, meta, rows, totals, notes
       <div><span>Contacto</span><strong>${escapeHTML(client.name || "-")}</strong></div>
       <div><span>Email</span><strong>${escapeHTML(client.email || "-")}</strong></div>
       <div><span>Teléfono</span><strong>${escapeHTML(client.phone || "-")}</strong></div>
+      ${client.taxId ? `<div><span>CUIT / DNI</span><strong>${escapeHTML(client.taxId)}</strong></div><div><span>Condición IVA</span><strong>${escapeHTML(labelize(client.taxCondition || "-"))}</strong></div>` : ""}
     </section>
   ` : "";
 
@@ -1325,7 +1370,7 @@ function openPrintSheet({ type, number, title, client, meta, rows, totals, notes
           <header class="sheet-header">
             <section>
               <div class="brand-lockup"><span>s</span><div><strong>${escapeHTML(company.name || "sCode")}</strong><small>${escapeHTML(company.legalName || "Digital Solutions")}</small></div></div>
-              <p>${escapeHTML(company.email)}<br>${escapeHTML(company.website)}</p>
+              <p>${[company.taxId ? `CUIT ${company.taxId}` : "", company.taxCondition ? labelize(company.taxCondition) : "", company.address, company.phone, company.email, company.website].filter(Boolean).map(escapeHTML).join("<br>")}</p>
             </section>
             <section class="sheet-title">
               <b>${escapeHTML(type)}</b>
@@ -1341,7 +1386,7 @@ function openPrintSheet({ type, number, title, client, meta, rows, totals, notes
             <tbody>${rowsHtml}</tbody>
           </table>
           <section class="sheet-bottom">
-            <p>${escapeHTML(notes || "")}</p>
+            <p>${escapeHTML(notes || "")}${terms.filter(([, value]) => value).map(([label, value]) => `<br><br><b>${escapeHTML(label)}</b><br>${escapeHTML(value).replace(/\n/g, "<br>")}`).join("")}</p>
             <div class="sheet-totals">${totalsHtml}</div>
           </section>
           <footer>
@@ -1381,7 +1426,7 @@ function deleteGeneric(key, id, message) {
 }
 
 const CLIENT_LINKED = {
-  projects: "proyecto", invoices: "factura", payments: "pago", tasks: "tarea", requests: "pedido", notes: "nota",
+  projects: "proyecto", invoices: "factura", payments: "pago", movements: "movimiento", tasks: "tarea", requests: "pedido", notes: "nota",
   actions: "acción", opportunities: "oportunidad", budgets: "presupuesto", calendarEvents: "evento",
   documents: "documento", supportPlans: "mantenimiento", clientPortalItems: "recurso del portal"
 };
@@ -1462,30 +1507,31 @@ function budgetTotal(budget) {
 }
 
 function nextLocalBudgetNumber() {
+  const prefix = state.companySettings?.budgetPrefix || "P-";
   const next = state.budgets
-    .map((budget) => Number(String(budget.number || "").replace("PRE-", "")))
-    .filter((value) => Number.isFinite(value))
+    .map((budget) => Number(String(budget.number || "").replace(/\D/g, "")) || 0)
     .reduce((max, value) => Math.max(max, value), 0) + 1;
-  return `PRE-${String(next).padStart(6, "0")}`;
+  return `${prefix}${String(next).padStart(4, "0")}`;
 }
 
 function fillClientForm(client) {
   dom.clientId.value = client.id;
   dom.clientName.value = client.name;
   dom.clientCompany.value = client.company;
-  dom.clientEmail.value = client.email;
-  dom.clientPhone.value = client.phone;
+  dom.clientEmail.value = client.email || "";
+  dom.clientPhone.value = client.phone || "";
   dom.clientAddress.value = client.address || "";
   dom.clientSocials.value = client.socials || "";
   dom.clientWebsite.value = client.website || "";
   dom.clientService.value = client.service;
-  dom.clientAmount.value = client.amount;
+  dom.clientAmount.value = client.amount ?? "";
   dom.clientCurrency.value = client.currency;
   dom.clientStatus.value = ({ activo: "cliente_activo", pendiente: "en_negociacion", finalizado: "proyecto_finalizado" }[client.status]) || client.status || "lead";
   dom.clientPriority.value = client.priority || "media";
   dom.clientFirstContact.value = client.firstContact || client.startDate || "";
   dom.clientLastContact.value = client.lastContact || "";
   dom.clientObservations.value = client.observations || "";
+  fillExtra("client", client);
   dom.clientFormTitle.textContent = "Editar cliente";
   renderView("clientes");
   openModal("clientModal");
@@ -1502,6 +1548,7 @@ function fillProjectForm(project) {
   dom.projectCurrency.value = project.currency;
   dom.projectStatus.value = ({ pendiente: "planificacion", en_progreso: "en_desarrollo", revision: "en_revision", entregado: "finalizado", pausado: "esperando_cliente" }[project.status]) || project.status || "planificacion";
   dom.projectProgress.value = project.progress;
+  if (dom.projectProgressRange) dom.projectProgressRange.value = project.progress || 0;
   dom.projectResponsible.value = project.responsible || "";
   dom.projectTechnologies.value = project.technologies || "";
   dom.projectLinks.value = project.links || "";
@@ -1509,6 +1556,7 @@ function fillProjectForm(project) {
   dom.projectDueDate.value = project.dueDate || "";
   dom.projectNotes.value = project.notes || "";
   dom.projectTasks.value = (project.tasks || []).join("\n");
+  fillExtra("project", project);
   dom.projectFormTitle.textContent = "Editar proyecto";
   renderView("proyectos");
   openModal("projectModal");
@@ -1526,6 +1574,7 @@ function fillInvoiceForm(invoice) {
   dom.invoiceDueDate.value = invoice.dueDate;
   dom.invoiceStatus.value = invoice.status;
   dom.invoiceNotes.value = invoice.notes || "";
+  fillExtra("invoice", invoice);
   dom.invoiceFormTitle.textContent = "Editar factura";
   renderView("facturacion");
   openModal("invoiceModal");
@@ -1541,8 +1590,9 @@ function fillPaymentForm(payment) {
   dom.paymentDate.value = payment.date;
   dom.paymentDueDate.value = payment.dueDate || "";
   dom.paymentStatus.value = payment.status;
-  dom.paymentMethod.value = payment.method;
+  setSelectValue(dom.paymentMethod, payment.method || "");
   dom.paymentNotes.value = payment.notes || "";
+  fillExtra("payment", payment);
   dom.paymentFormTitle.textContent = "Editar pago";
   renderView("pagos");
   openModal("paymentModal");
@@ -1556,6 +1606,9 @@ function fillMovementForm(item) {
   dom.movementCurrency.value = item.currency;
   dom.movementDate.value = item.date;
   dom.movementDescription.value = item.description;
+  dom.movementClient.value = item.clientId || "";
+  syncControls();
+  fillExtra("movement", item);
   dom.movementFormTitle.textContent = "Editar movimiento";
   renderView("movimientos");
   openModal("movementModal");
@@ -1571,6 +1624,7 @@ function fillSubscriptionForm(item) {
   dom.subscriptionCurrency.value = item.currency;
   dom.subscriptionRenewal.value = item.renewalDate;
   dom.subscriptionStatus.value = item.status;
+  fillExtra("subscription", item);
   dom.subscriptionFormTitle.textContent = "Editar suscripción";
   renderView("suscripciones");
   openModal("subscriptionModal");
@@ -1589,6 +1643,7 @@ function fillTaskForm(item) {
   dom.taskDueDate.value = item.dueDate || "";
   dom.taskChecklist.value = (item.checklist || []).join("\n");
   dom.taskComments.value = item.comments || "";
+  fillExtra("task", item);
   dom.taskFormTitle.textContent = "Editar tarea";
   renderView("tareas");
   openModal("taskModal");
@@ -1602,6 +1657,7 @@ function fillGoalForm(item) {
   dom.goalTarget.value = item.target;
   dom.goalCurrent.value = item.current;
   dom.goalDueDate.value = item.dueDate;
+  fillExtra("goal", item);
   dom.goalFormTitle.textContent = "Editar meta";
   renderView("metas");
   openModal("goalModal");
@@ -1620,6 +1676,7 @@ function fillRequestForm(item) {
   dom.requestResponsible.value = item.responsible || "";
   dom.requestDueDate.value = item.dueDate || "";
   dom.requestNotes.value = item.notes || "";
+  fillExtra("request", item);
   dom.requestFormTitle.textContent = "Editar pedido";
   renderView("administracion");
   openModal("requestModal");
@@ -1633,6 +1690,7 @@ function fillNoteForm(item) {
   dom.noteTitle.value = item.title;
   dom.noteContent.value = item.content;
   dom.noteTone.value = item.tone || "normal";
+  fillExtra("note", item);
   dom.noteFormTitle.textContent = "Editar nota";
   renderView("administracion");
   openModal("noteModal"); 
@@ -1647,6 +1705,7 @@ function fillActionForm(item) {
   dom.actionDueDate.value = item.dueDate;
   dom.actionPriority.value = item.priority || "media";
   dom.actionStatus.value = item.status || "pendiente";
+  fillExtra("action", item);
   dom.actionFormTitle.textContent = "Editar acción";
   renderView("administracion");
   openModal("actionModal");
@@ -1664,6 +1723,7 @@ function fillOpportunityForm(item) {
   dom.opportunityNextAction.value = item.nextAction || "";
   dom.opportunityResponsible.value = item.responsible || "";
   dom.opportunityNotes.value = item.notes || "";
+  fillExtra("opportunity", item);
   dom.opportunityFormTitle.textContent = "Editar oportunidad";
   renderView("crm");
   openModal("opportunityModal");
@@ -1674,7 +1734,7 @@ function fillBudgetForm(item) {
   dom.budgetClient.value = item.clientId;
   if (dom.budgetNumber) dom.budgetNumber.value = item.number || "";
   dom.budgetProjectName.value = item.projectName;
-  dom.budgetServices.value = item.services || "";
+  loadBudgetItems(item.services || "");
   dom.budgetDiscount.value = item.discount || 0;
   if (dom.budgetTaxes) dom.budgetTaxes.value = item.taxes || 0;
   dom.budgetCurrency.value = item.currency || "ARS";
@@ -1682,6 +1742,7 @@ function fillBudgetForm(item) {
   dom.budgetValidUntil.value = item.validUntil || "";
   dom.budgetStatus.value = item.status || "borrador";
   dom.budgetNotes.value = item.notes || "";
+  fillExtra("budget", item);
   dom.budgetFormTitle.textContent = "Editar presupuesto";
   renderView("presupuestos");
   openModal("budgetModal");
@@ -1700,6 +1761,8 @@ function fillCalendarEventForm(item) {
   dom.calendarEventStatus.value = item.status || "pendiente";
   dom.calendarEventPriority.value = item.priority || "media";
   dom.calendarEventDescription.value = item.description || "";
+  syncAllDay();
+  fillExtra("calendarEvent", item);
   dom.calendarEventFormTitle.textContent = "Editar evento";
   renderView("calendario");
   openModal("calendarEventModal");
@@ -1708,13 +1771,14 @@ function fillCalendarEventForm(item) {
 function fillDocumentForm(item) {
   dom.documentId.value = item.id;
   dom.documentName.value = item.name;
-  dom.documentType.value = item.type || "";
+  setSelectValue(dom.documentType, item.type || "otro");
   dom.documentClient.value = item.clientId || "";
   syncControls();
   dom.documentProject.value = item.projectId || "";
   dom.documentLink.value = item.link || "";
   dom.documentTags.value = item.tags || "";
   dom.documentDescription.value = item.description || "";
+  fillExtra("document", item);
   dom.documentFormTitle.textContent = "Editar documento";
   renderView("documentos");
   openModal("documentModal");
@@ -1735,6 +1799,7 @@ function fillSupportForm(item) {
   dom.supportCurrency.value = item.currency || "ARS";
   dom.supportStatus.value = item.status || "activo";
   dom.supportNotes.value = item.notes || "";
+  fillExtra("support", item);
   dom.supportFormTitle.textContent = "Editar mantenimiento";
   renderView("soporte");
   openModal("supportModal");
@@ -1747,6 +1812,7 @@ function fillTeamForm(item) {
   dom.teamRole.value = item.role;
   dom.teamStatus.value = item.status || "activo";
   dom.teamFocus.value = item.focus || "";
+  fillExtra("team", item);
   dom.teamFormTitle.textContent = "Editar miembro";
   syncTeamAccessFields();
   renderView("equipo");
@@ -1764,6 +1830,7 @@ function fillMarketingForm(item) {
   dom.marketingSales.value = item.sales || 0;
   dom.marketingStatus.value = item.status || "activa";
   dom.marketingDate.value = item.date || "";
+  fillExtra("marketing", item);
   dom.marketingFormTitle.textContent = "Editar campana";
   renderView("marketing");
   openModal("marketingModal");

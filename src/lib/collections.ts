@@ -23,7 +23,7 @@ export const COLLECTIONS: CollectionDef[] = [
   { key: "projects", table: "projects", label: "Proyecto", relations: [client] },
   { key: "invoices", table: "invoices", label: "Factura", relations: [client, project] },
   { key: "payments", table: "payments", label: "Pago", relations: [client, project, invoice] },
-  { key: "movements", table: "movements", label: "Movimiento", relations: [] },
+  { key: "movements", table: "movements", label: "Movimiento", relations: [client, project] },
   { key: "subscriptions", table: "subscriptions", label: "Suscripcion", relations: [] },
   { key: "tasks", table: "project_tasks", label: "Tarea de proyecto", relations: [client, project] },
   { key: "goals", table: "goals", label: "Meta", relations: [] },
